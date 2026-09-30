@@ -1,5 +1,6 @@
 plugins {
     id("dev.kikugie.stonecutter")
+    id("net.fabricmc.fabric-loom-remap") version "1.17-SNAPSHOT" apply false
 }
 
 // The version currently active for editing/running in the IDE.
@@ -26,16 +27,22 @@ stonecutter parameters {
         string(current.parsed >= "26.1") { replace("net.minecraft.client.GuiMessage", "net.minecraft.client.multiplayer.chat.GuiMessage") }
         // Minecraft: GuiGraphics was renamed to GuiGraphicsExtractor, and its drawString/
         // drawCenteredString methods were renamed to text/centeredText (part of the render-state
-        // extraction rework that also prepares for the 26.2 Vulkan backend option)
+        // Minecraft: GuiGraphics -> GuiGraphicsExtractor in 26.1
         string(current.parsed >= "26.1") { replace("GuiGraphics", "GuiGraphicsExtractor") }
-        string(current.parsed >= "26.1") { replace("drawCenteredString", "centeredText") }
-        string(current.parsed >= "26.1") { replace("drawString(", "text(") }
+        string(current.parsed >= "26.1") { replace("graphics.drawCenteredString", "graphics.centeredText") }
 
         // 26.2 goes further still: Minecraft.setScreen, Gui.getChat, Gui.setOverlayMessage and
         // Minecraft.getToastManager were all moved onto a new Hud object nested under Gui.
-        string(current.parsed >= "26.2") { replace(".setScreen(", ".gui.setScreen(") }
+        string(current.parsed >= "26.2") { replace("client.setScreen(", "client.gui.setScreen(") }
+        string(current.parsed >= "26.2") { replace("Minecraft.getInstance().setScreen(", "Minecraft.getInstance().gui.setScreen(") }
+        string(current.parsed >= "26.2") { replace("minecraft.setScreen(", "minecraft.gui.setScreen(") }
+        
         string(current.parsed >= "26.2") { replace("gui.getChat()", "gui.hud.getChat()") }
         string(current.parsed >= "26.2") { replace("gui.setOverlayMessage(", "gui.hud.setOverlayMessage(") }
-        string(current.parsed >= "26.2") { replace("getToastManager()", "gui.toastManager()") }
+        
+        string(current.parsed >= "26.2") { replace("client.getToastManager()", "client.gui.toastManager()") }
+
+        // 26.3 (1.21.4) migrated from GLFW to SDL3: InputConstants.Type.KEYSYM renamed to KEYBOARD
+        string(current.parsed >= "26.3") { replace("InputConstants.Type.KEYSYM", "InputConstants.Type.KEYBOARD") }
     }
 }

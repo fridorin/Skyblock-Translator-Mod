@@ -235,15 +235,17 @@ public class SkyblockDictionary {
         if (entries == null || entries.isEmpty()) return null;
 
         String result = text;
+        String lowerResult = result.toLowerCase();
         boolean changed = false;
         for (PhraseEntry entry : entries) {
             // Quick contains() check before running regex (much cheaper)
-            if (!result.toLowerCase().contains(entry.key)) {
+            if (!lowerResult.contains(entry.key)) {
                 continue;
             }
             java.util.regex.Matcher matcher = entry.pattern.matcher(result);
             if (matcher.find()) {
                 result = matcher.replaceAll(java.util.regex.Matcher.quoteReplacement(entry.translation));
+                lowerResult = result.toLowerCase();
                 changed = true;
             }
         }
@@ -532,6 +534,7 @@ public class SkyblockDictionary {
         for (Map.Entry<String, String> entry : DICTIONARY.entrySet()) {
             String key = entry.getKey();
             String value = entry.getValue();
+            
             if (key.startsWith("item_type.")) {
                 String typeName = key.substring(10).trim().toUpperCase();
                 ITEM_TYPES.put(typeName, value);

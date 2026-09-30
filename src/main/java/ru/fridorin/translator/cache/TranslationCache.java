@@ -7,31 +7,26 @@ import net.fabricmc.loader.api.FabricLoader;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Type;
-import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 public class TranslationCache {
+    private static final Logger LOGGER = LoggerFactory.getLogger(TranslationCache.class);
     private static final Gson GSON = new GsonBuilder().create();
     private static File cacheFile;
     private static final int MAX_SIZE = 10000;
 
-    // LRU cache: access-order LinkedHashMap with automatic eviction
-    // All access must be synchronized on LRU_LOCK
-    private static final LinkedHashMap<String, String> lruCache = new LinkedHashMap<>(256, 0.75f, true) {
-        @Override
-        protected boolean removeEldestEntry(Map.Entry<String, String> eldest) {
-            return size() > MAX_SIZE;
-        }
-    };
-    // Fast case-insensitive lookup index (no ordering needed)
-    private static final ConcurrentHashMap<String, String> lowercaseCache = new ConcurrentHashMap<>();
+    private static final com.google.common.cache.Cache<String, String> lruCache = com.google.common.cache.CacheBuilder.newBuilder()
+        .maximumSize(MAX_SIZE)
+        .build();
 
-    private static final Object LRU_LOCK = new Object();
+    private static final Object SCHEDULER_LOCK = new Object();
     private static final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "SkyblockTranslator-CacheSaver");
         t.setDaemon(true);
@@ -40,15 +35,12 @@ public class TranslationCache {
     private static ScheduledFuture<?> pendingSaveTask = null;
     private static volatile boolean isDirty = false;
 
-    private static final Object SCHEDULER_LOCK = new Object();
-
     public static void loadForLanguage(String lang) {
-        synchronized (LRU_LOCK) {
+        synchronized (SCHEDULER_LOCK) {
             if (isDirty) {
-                save();
+                saveLocked();
             }
-            lruCache.clear();
-            lowercaseCache.clear();
+            lruCache.invalidateAll();
             
             String filename = "cache_" + lang + ".json";
             cacheFile = FabricLoader.getInstance().getConfigDir().resolve("skyblock_translator/" + filename).toFile();
@@ -71,18 +63,8 @@ public class TranslationCache {
 
     public static String get(String text) {
         if (text == null) return null;
-        String trimmed = text.trim();
-        // Try exact match first (O(1) from ConcurrentHashMap)
-        String lower = trimmed.toLowerCase();
-        String fromLower = lowercaseCache.get(lower);
-        if (fromLower != null) {
-            // Touch in LRU to keep it fresh
-            synchronized (LRU_LOCK) {
-                lruCache.get(trimmed);
-            }
-            return fromLower;
-        }
-        return null;
+        String lower = text.trim().toLowerCase();
+        return lruCache.getIfPresent(lower);
     }
 
     public static void put(String original, String translated) {
@@ -96,11 +78,10 @@ public class TranslationCache {
             return;
         }
 
-        synchronized (LRU_LOCK) {
-            lruCache.put(trimmedOrig, trimmedTrans);
+        synchronized (SCHEDULER_LOCK) {
+            lruCache.put(trimmedOrig.toLowerCase(), trimmedTrans);
+            isDirty = true;
         }
-        lowercaseCache.put(trimmedOrig.toLowerCase(), trimmedTrans);
-        isDirty = true;
         scheduleSave();
     }
 
@@ -127,31 +108,37 @@ public class TranslationCache {
                         isDirty = true;
                         continue;
                     }
-                    lruCache.put(key, val);
-                    lowercaseCache.put(key.toLowerCase(), val);
+                    lruCache.put(key.toLowerCase(), val);
                     count++;
                 }
             }
         } catch (Exception e) {
+            LOGGER.error("Failed to load translation cache", e);
         }
     }
 
     private static void save() {
+        synchronized (SCHEDULER_LOCK) {
+            saveLocked();
+        }
+    }
+
+    private static void saveLocked() {
         if (!isDirty || cacheFile == null) return;
-        synchronized (LRU_LOCK) {
-            if (!isDirty) return;
-            Map<String, String> snapshot = new java.util.LinkedHashMap<>(lruCache);
-            isDirty = false;
-            try {
-                File parent = cacheFile.getParentFile();
-                if (parent != null && !parent.exists()) {
-                    parent.mkdirs();
-                }
-                try (java.io.BufferedWriter writer = java.nio.file.Files.newBufferedWriter(cacheFile.toPath(), java.nio.charset.StandardCharsets.UTF_8)) {
-                    GSON.toJson(snapshot, writer);
-                }
-            } catch (IOException e) {
+        Map<String, String> snapshot = new java.util.LinkedHashMap<>(lruCache.asMap());
+        isDirty = false;
+        try {
+            File parent = cacheFile.getParentFile();
+            if (parent != null && !parent.exists()) {
+                parent.mkdirs();
             }
+            File tempFile = new File(cacheFile.getParentFile(), cacheFile.getName() + ".tmp");
+            try (java.io.BufferedWriter writer = java.nio.file.Files.newBufferedWriter(tempFile.toPath(), java.nio.charset.StandardCharsets.UTF_8)) {
+                GSON.toJson(snapshot, writer);
+            }
+            java.nio.file.Files.move(tempFile.toPath(), cacheFile.toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException e) {
+            LOGGER.error("Failed to save translation cache", e);
         }
     }
 
@@ -176,10 +163,7 @@ public class TranslationCache {
     }
 
     public static void clear() {
-        synchronized (LRU_LOCK) {
-            lruCache.clear();
-        }
-        lowercaseCache.clear();
+        lruCache.invalidateAll();
         isDirty = true;
         save();
     }

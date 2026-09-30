@@ -22,8 +22,12 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class TranslationService {
+    private static final Logger LOGGER = LoggerFactory.getLogger(TranslationService.class);
+
     // Bounded executor to prevent unbounded thread growth from HTTP requests
     private static final java.util.concurrent.ExecutorService HTTP_EXECUTOR = java.util.concurrent.Executors.newFixedThreadPool(4, r -> {
         Thread t = new Thread(r, "SkyblockTranslator-HTTP");
@@ -37,7 +41,7 @@ public class TranslationService {
             .executor(HTTP_EXECUTOR)
             .build();
 
-    private static final java.util.concurrent.ExecutorService TRANSLATION_EXECUTOR = java.util.concurrent.Executors.newFixedThreadPool(3, r -> {
+    public static final java.util.concurrent.ExecutorService TRANSLATION_EXECUTOR = java.util.concurrent.Executors.newFixedThreadPool(3, r -> {
         Thread t = new Thread(r, "SkyblockTranslator-Worker");
         t.setDaemon(true);
         return t;
@@ -62,7 +66,7 @@ public class TranslationService {
     private static void notifyTooltipCacheInvalidation() {
         Runnable inv = tooltipCacheInvalidator;
         if (inv != null) {
-            try { inv.run(); } catch (Exception e) { /* ignore */ }
+            try { inv.run(); } catch (Exception e) { LOGGER.warn("Tooltip cache invalidator failed", e); }
         }
     }
     private static final ThreadLocal<Boolean> BYPASS_TRANSLATION = ThreadLocal.withInitial(() -> false);
@@ -129,23 +133,30 @@ public class TranslationService {
         }
     }
 
+    private static final Pattern DAMAGE_INDICATOR_CLEANUP = Pattern.compile("crit|[0-9.,\\s+\\-kmb%]|[✧❤⚡❈⚔☠]", Pattern.CASE_INSENSITIVE);
+
     public static boolean isDamageIndicator(String cleanText) {
         if (cleanText == null) return false;
         String lower = cleanText.toLowerCase().trim();
         if (lower.isEmpty()) return false;
-        String stripped = lower.replaceAll("crit", "").replaceAll("[0-9.,\\s+\\-kmb%]", "").replaceAll("[✧❤⚡❈⚔☠]", "");
+        String stripped = DAMAGE_INDICATOR_CLEANUP.matcher(lower).replaceAll("");
         return stripped.isEmpty();
     }
 
+    private static final Pattern UUID_PATTERN = Pattern.compile(".*[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}.*");
+    private static final Pattern TECHNICAL_CLEANUP = Pattern.compile("(?i)\\b_[fpcFPC]?\\d+_\\b|\\{F\\d+\\}|\\{P\\d+\\}|\\{C\\d+\\}|\\{\\d+\\}");
+
     public static boolean isTechnicalOrModLine(String text) {
         if (text == null) return true;
-        String clean = text.replaceAll("§x(?:§[0-9a-fA-F]){6}|§.", "")
-                           .replaceAll("(?i)\\{F\\d+\\}|\\{P\\d+\\}|\\{C\\d+\\}|\\{\\d+\\}", "");
+        String clean = TECHNICAL_CLEANUP.matcher(
+            text.replaceAll("§x(?:§[0-9a-fA-F]){6}|§.", "")
+        ).replaceAll("");
+        
         String lower = clean.toLowerCase().trim();
         if (lower.isEmpty()) return true;
 
         TranslatorConfig config = TranslatorConfigManager.getConfig();
-        if (config.ignoreUuidsAndIds && (lower.contains("uuid:") || lower.contains("profile id:") || lower.contains("coop id:") || lower.matches(".*[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}.*"))) return true;
+        if (config.ignoreUuidsAndIds && (lower.contains("uuid:") || lower.contains("profile id:") || lower.contains("coop id:") || UUID_PATTERN.matcher(lower).matches())) return true;
         if (config.ignoreUrlsAndIps && (lower.contains("hypixel.net") || lower.contains("http://") || lower.contains("https://"))) return true;
         if (config.ignoreModPrefixes && (lower.contains("neu:") || lower.contains("skytils:") || lower.contains("sba:"))) return true;
         
@@ -154,10 +165,11 @@ public class TranslationService {
         return false;
     }
 
-    private static final Pattern NUMBER_PATTERN = Pattern.compile("[+-]?\\d+(?:[.,]\\d+)*(?:st|nd|rd|th|ST|ND|RD|TH|[kKM%])?");
+    private static final Pattern NUMBER_PATTERN = Pattern.compile("\\d{1,2}:\\d{2}(?::\\d{2})?|\\d{1,2}/\\d{1,2}/\\d{2,4}|[+-]?\\d+(?:[.,]\\d+)*(?:st|nd|rd|th|ST|ND|RD|TH|[kKM%])?");
     public static final Pattern ENCHANTMENT_LINE_PATTERN = Pattern.compile("^(?:[A-Za-z0-9\\s'-]+\\s+[IVXLCDM]+)(?:,\\s+[A-Za-z0-9\\s'-]+\\s+[IVXLCDM]+)*$");
     public static final Pattern NAMESPACE_PATTERN = Pattern.compile("^(?i)(minecraft|skyblock)\\s*:\\s*.+$");
     private static final Pattern FORMATTING_PATTERN = Pattern.compile("§x(?:§[0-9a-fA-F]){6}|§.", Pattern.CASE_INSENSITIVE);
+    private static final Pattern NON_ALPHANUMERIC_PATTERN = Pattern.compile("[^a-zA-Z0-9]");
 
     public static class FormattingTemplateResult {
         public final String templatedText;
@@ -183,20 +195,29 @@ public class TranslationService {
         return new FormattingTemplateResult(sb.toString(), codes);
     }
 
+    private static final Pattern[] RESTORE_FORMATTING_PATTERNS = new Pattern[32];
+    private static final Pattern[] RESTORE_TEMPLATE_PATTERNS = new Pattern[32];
+    static {
+        for (int i = 0; i < 32; i++) {
+            RESTORE_FORMATTING_PATTERNS[i] = Pattern.compile("(?:\\{\\s*|\\b_?|[\\(\\[])[fFфФ]\\s*_*\\s*" + i + "\\s*_*\\s*(?:\\s*\\}|_?\\b|[\\)\\]])");
+            RESTORE_TEMPLATE_PATTERNS[i] = Pattern.compile("(?:\\{\\s*|[\\(\\[])" + i + "\\s*(?:\\s*\\}|[\\)\\]])");
+        }
+    }
+
     public static String restoreFormatting(String text, List<String> codes) {
         if (text == null) return null;
         String result = text;
         for (int i = 0; i < codes.size(); i++) {
-            String regex = "(?:\\{\\s*|\\b_?|[\\(\\[])[fFфФ]\\s*_*\\s*" + i + "\\s*_*\\s*(?:\\s*\\}|_?\\b|[\\)\\]])";
-            result = Pattern.compile(regex).matcher(result).replaceAll(Matcher.quoteReplacement(codes.get(i)));
+            Pattern p = i < 32 ? RESTORE_FORMATTING_PATTERNS[i] : Pattern.compile("(?:\\{\\s*|\\b_?|[\\(\\[])[fFфФ]\\s*_*\\s*" + i + "\\s*_*\\s*(?:\\s*\\}|_?\\b|[\\)\\]])");
+            result = p.matcher(result).replaceAll(Matcher.quoteReplacement(codes.get(i)));
         }
         return result;
     }
 
     public static boolean isTranslationSame(String original, String translated) {
         if (original == null || translated == null) return true;
-        String cleanOrig = original.replaceAll("§x(?:§[0-9a-fA-F]){6}|§.", "").replaceAll("[^a-zA-Z0-9]", "").toLowerCase();
-        String cleanTrans = translated.replaceAll("§x(?:§[0-9a-fA-F]){6}|§.", "").replaceAll("[^a-zA-Z0-9]", "").toLowerCase();
+        String cleanOrig = NON_ALPHANUMERIC_PATTERN.matcher(FORMATTING_PATTERN.matcher(original).replaceAll("")).replaceAll("").toLowerCase();
+        String cleanTrans = NON_ALPHANUMERIC_PATTERN.matcher(FORMATTING_PATTERN.matcher(translated).replaceAll("")).replaceAll("").toLowerCase();
         return cleanOrig.equals(cleanTrans);
     }
 
@@ -229,8 +250,8 @@ public class TranslationService {
         String result = templatedText;
         for (int i = 0; i < values.size(); i++) {
             result = result.replace("{" + i + "}", values.get(i));
-            String regex = "(?:\\{\\s*|[\\(\\[])" + i + "\\s*(?:\\s*\\}|[\\)\\]])";
-            result = Pattern.compile(regex).matcher(result).replaceAll(Matcher.quoteReplacement(values.get(i)));
+            Pattern p = i < 32 ? RESTORE_TEMPLATE_PATTERNS[i] : Pattern.compile("(?:\\{\\s*|[\\(\\[])" + i + "\\s*(?:\\s*\\}|[\\)\\]])");
+            result = p.matcher(result).replaceAll(Matcher.quoteReplacement(values.get(i)));
         }
         return result;
     }
@@ -240,9 +261,15 @@ public class TranslationService {
         return text.replaceAll("[\\[\\{\\(]\\s*(\\d+)\\s*[\\}\\]\\)]", "{$1}");
     }
 
+    private static final Pattern PUNCTUATION_SPACE_1 = Pattern.compile("\\s+(\\)|\\]|\\})");
+    private static final Pattern PUNCTUATION_SPACE_2 = Pattern.compile("(\\(|\\[|\\{)\\s+");
+    private static final Pattern PUNCTUATION_SPACE_3 = Pattern.compile("\\s+([.,!?:;])");
+
     public static String cleanPunctuationSpaces(String text) {
         if (text == null) return null;
-        return text.replaceAll("\\s+(\\)|\\]|\\})", "$1").replaceAll("(\\(|\\[|\\{)\\s+", "$1").replaceAll("\\s+([.,!?:;])", "$1");
+        String r = PUNCTUATION_SPACE_1.matcher(text).replaceAll("$1");
+        r = PUNCTUATION_SPACE_2.matcher(r).replaceAll("$1");
+        return PUNCTUATION_SPACE_3.matcher(r).replaceAll("$1");
     }
 
     public static String getImmediateTranslation(String text) {
@@ -387,8 +414,9 @@ public class TranslationService {
         try {
             String url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=" + targetLang + "&dt=t&q=" + URLEncoder.encode(text, StandardCharsets.UTF_8);
             HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).header("User-Agent", "Mozilla/5.0").timeout(Duration.ofSeconds(5)).GET().build();
-            return HTTP_CLIENT.sendAsync(request, HttpResponse.BodyHandlers.ofString()).thenApply(response -> {
+            return HTTP_CLIENT.sendAsync(request, HttpResponse.BodyHandlers.ofString()).whenComplete((response, throwable) -> {
                 API_SEMAPHORE.release();
+            }).thenApply(response -> {
                 if (response.statusCode() == 200) {
                     JsonArray root = JsonParser.parseString(response.body()).getAsJsonArray();
                     if (root.size() > 0 && root.get(0).isJsonArray()) {
@@ -398,8 +426,8 @@ public class TranslationService {
                     }
                 }
                 return "";
-            }).exceptionally(t -> { API_SEMAPHORE.release(); return ""; });
-        } catch (Exception e) { API_SEMAPHORE.release(); return CompletableFuture.completedFuture(""); }
+            }).exceptionally(t -> { LOGGER.warn("Google Translate API failed", t); return ""; });
+        } catch (Exception e) { API_SEMAPHORE.release(); LOGGER.warn("Google Translate API threw exception", e); return CompletableFuture.completedFuture(""); }
     }
 
     private static CompletableFuture<String> translateDeepLAsync(String text, String targetLang, String apiKey) {
@@ -407,11 +435,12 @@ public class TranslationService {
             return CompletableFuture.completedFuture("");
         }
         HttpRequest request = HttpRequest.newBuilder().uri(URI.create("https://api-free.deepl.com/v2/translate")).header("Authorization", "DeepL-Auth-Key " + apiKey).header("Content-Type", "application/x-www-form-urlencoded").timeout(Duration.ofSeconds(5)).POST(HttpRequest.BodyPublishers.ofString("text=" + URLEncoder.encode(text, StandardCharsets.UTF_8) + "&target_lang=" + targetLang.toUpperCase())).build();
-        return HTTP_CLIENT.sendAsync(request, HttpResponse.BodyHandlers.ofString()).thenApply(response -> {
+        return HTTP_CLIENT.sendAsync(request, HttpResponse.BodyHandlers.ofString()).whenComplete((response, throwable) -> {
             API_SEMAPHORE.release();
+        }).thenApply(response -> {
             if (response.statusCode() == 200) return JsonParser.parseString(response.body()).getAsJsonObject().getAsJsonArray("translations").get(0).getAsJsonObject().get("text").getAsString();
             return "[DeepL Error: " + response.statusCode() + "]";
-        }).exceptionally(e -> { API_SEMAPHORE.release(); return "[DeepL Exception: " + e.getMessage() + "]"; });
+        }).exceptionally(e -> { LOGGER.warn("DeepL API failed", e); return "[DeepL Exception: " + e.getMessage() + "]"; });
     }
 
     private static CompletableFuture<String> translateYandexAsync(String text, String targetLang, String apiKey) {
@@ -420,11 +449,12 @@ public class TranslationService {
         }
         JsonObject body = new JsonObject(); body.addProperty("targetLanguageCode", targetLang); JsonArray texts = new JsonArray(); texts.add(text); body.add("texts", texts);
         HttpRequest request = HttpRequest.newBuilder().uri(URI.create("https://translate.api.cloud.yandex.net/translate/v2/translate")).header("Authorization", "Api-Key " + apiKey).header("Content-Type", "application/json").timeout(Duration.ofSeconds(5)).POST(HttpRequest.BodyPublishers.ofString(body.toString())).build();
-        return HTTP_CLIENT.sendAsync(request, HttpResponse.BodyHandlers.ofString()).thenApply(response -> {
+        return HTTP_CLIENT.sendAsync(request, HttpResponse.BodyHandlers.ofString()).whenComplete((response, throwable) -> {
             API_SEMAPHORE.release();
+        }).thenApply(response -> {
             if (response.statusCode() == 200) return JsonParser.parseString(response.body()).getAsJsonObject().getAsJsonArray("translations").get(0).getAsJsonObject().get("text").getAsString();
             return "[Yandex Error: " + response.statusCode() + "]";
-        }).exceptionally(e -> { API_SEMAPHORE.release(); return "[Yandex Exception: " + e.getMessage() + "]"; });
+        }).exceptionally(e -> { LOGGER.warn("Yandex API failed", e); return "[Yandex Exception: " + e.getMessage() + "]"; });
     }
 
     public static boolean containsNonEnglishLetters(String text) {
@@ -433,7 +463,11 @@ public class TranslationService {
         int nonEng = 0, eng = 0;
         for (int i = 0; i < clean.length(); i++) {
             char c = clean.charAt(i);
-            if (Character.isLetter(c)) { if ((c < 'a' || c > 'z') && (c < 'A' || c > 'Z')) nonEng++; else eng++; }
+            if (Character.isLetter(c)) {
+                Character.UnicodeScript script = Character.UnicodeScript.of(c);
+                if (script == Character.UnicodeScript.COMMON) continue; // skip symbols like ✦
+                if ((c < 'a' || c > 'z') && (c < 'A' || c > 'Z')) nonEng++; else eng++; 
+            }
         }
         return nonEng > eng && nonEng >= 1;
     }
@@ -459,9 +493,9 @@ public class TranslationService {
                 String n = i.getProfile().name();
                 if (n != null && n.length() >= 3 && !names.contains(n)) names.add(n);
             }
-        } catch (Exception e) {}
+        } catch (Exception e) { LOGGER.warn("Failed to update player names", e); }
         cachedPlayerNames = names;
-        playerNamesSet = new java.util.HashSet<>(names);
+        playerNamesSet = java.util.Collections.unmodifiableSet(new java.util.HashSet<>(names));
     }
 
     public static PlayerTemplateResult templatePlayerNames(String text) {

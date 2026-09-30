@@ -27,10 +27,10 @@
 		"skyblock_translator.client.mixins.json"
 	],
 	"depends": {
-		"fabricloader": ">=0.19.2",
+		"fabricloader": ">=0.19.5",
 		"minecraft": "${minecraft}",
 		"java": ">=${java}",
-		"fabric-api": "*",
-		"yet_another_config_lib_v3": ">=3.8.1"
+		"fabric-api": ">=${fabric_api}",
+		"yet_another_config_lib_v3": ">=${yacl}"
 	}
 }

@@ -13,7 +13,9 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.ModifyArg;
 
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
 
 //? if <26.2 {
 @Mixin(Gui.class)
@@ -39,8 +41,10 @@ public class GuiMixin {
     }
 
     // Keyed by plain text string — stable across frames unlike Component objects
-    private static final ConcurrentHashMap<String, CacheEntry> SCOREBOARD_CACHE = new ConcurrentHashMap<>();
-
+    private static final Cache<String, CacheEntry> SCOREBOARD_CACHE = CacheBuilder.newBuilder()
+        .maximumSize(200)
+        .expireAfterWrite(30, TimeUnit.SECONDS)
+        .build();
     @ModifyArg(
         method = "displayScoreboardSidebar",
         at = @At(
@@ -55,7 +59,7 @@ public class GuiMixin {
         if (plainText.trim().isEmpty()) return text;
 
         // Fast cache lookup by plain text — this is called every frame
-        CacheEntry cached = SCOREBOARD_CACHE.get(plainText);
+        CacheEntry cached = SCOREBOARD_CACHE.getIfPresent(plainText);
         if (cached != null && !cached.isExpired()) {
             return cached.pending ? text : cached.translatedComponent;
         }

@@ -48,6 +48,7 @@ public class TranslatorConfigManager {
                 }
             }
         } catch (Exception e) {
+            System.err.println("[Skyblock Translator] Failed to load config: " + e.getMessage());
         }
     }
 
@@ -65,6 +66,7 @@ public class TranslatorConfigManager {
             }
             ru.fridorin.translator.TranslatorModClient.clearComponentCache();
         } catch (IOException e) {
+            System.err.println("[Skyblock Translator] Failed to save config: " + e.getMessage());
         }
     }
 }

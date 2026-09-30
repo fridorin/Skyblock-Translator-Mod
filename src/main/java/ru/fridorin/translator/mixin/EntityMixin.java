@@ -11,8 +11,9 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-import java.util.concurrent.ConcurrentHashMap;
-
+import java.util.concurrent.TimeUnit;
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
 @Mixin(Entity.class)
 public class EntityMixin {
     private static class CacheEntry {
@@ -33,19 +34,11 @@ public class EntityMixin {
         }
     }
 
-    // Key: entity id, value: cached translation. ConcurrentHashMap avoids lock contention on render thread.
-    private static final ConcurrentHashMap<Integer, CacheEntry> TRANSLATED_NAMES_CACHE = new ConcurrentHashMap<>();
-
-    // Periodic cleanup counter to avoid unbounded cache growth
-    private static volatile long lastCleanup = 0;
-    private static final long CLEANUP_INTERVAL = 30000;
-
-    private static void cleanupIfNeeded() {
-        long now = System.currentTimeMillis();
-        if (now - lastCleanup < CLEANUP_INTERVAL) return;
-        lastCleanup = now;
-        TRANSLATED_NAMES_CACHE.entrySet().removeIf(e -> e.getValue().isExpired());
-    }
+    // Key: entity id, value: cached translation. Guava cache avoids unbounded memory growth.
+    private static final Cache<Integer, CacheEntry> TRANSLATED_NAMES_CACHE = CacheBuilder.newBuilder()
+        .maximumSize(500)
+        .expireAfterWrite(30, TimeUnit.SECONDS)
+        .build();
 
     @Inject(method = "getDisplayName", at = @At("RETURN"), cancellable = true)
     private void onGetDisplayName(CallbackInfoReturnable<Component> cir) {
@@ -59,7 +52,7 @@ public class EntityMixin {
         int entityId = entity.getId();
 
         // Fast cache check first — this is the hot path, must be cheap
-        CacheEntry cached = TRANSLATED_NAMES_CACHE.get(entityId);
+        CacheEntry cached = TRANSLATED_NAMES_CACHE.getIfPresent(entityId);
         if (cached != null && plainText.equals(cached.originalText) && !cached.isExpired()) {
             if (!cached.pending) {
                 cir.setReturnValue(cached.translatedComponent);
@@ -94,12 +87,17 @@ public class EntityMixin {
         boolean isHologram = false;
 
         if (entity instanceof net.minecraft.world.entity.decoration.ArmorStand) {
-            if (plainText.contains("❤") || plainText.contains("HP") || plainText.contains("[Lv") || plainText.contains("Lv ")) {
+            net.minecraft.world.entity.decoration.ArmorStand armorStand = (net.minecraft.world.entity.decoration.ArmorStand) entity;
+            boolean isHologramBase = armorStand.isInvisible() && armorStand.isNoGravity();
+            
+            if ((plainText.contains("❤") && !isHologramBase) || plainText.contains("HP") || plainText.contains("[Lv") || plainText.contains("Lv ")) {
                 isMob = true;
             } else if (plainText.contains("[NPC]") || ru.fridorin.translator.service.SkyblockDictionary.isNpcName(plainText)) {
                 isNpc = true;
-            } else {
+            } else if (isHologramBase) {
                 isHologram = true;
+            } else {
+                isMob = true;
             }
         } else {
             if (entity instanceof net.minecraft.world.entity.monster.Monster || 
@@ -153,8 +151,5 @@ public class EntityMixin {
                 TRANSLATED_NAMES_CACHE.put(entityId, new CacheEntry(plainText, original, false));
             }
         });
-
-        // Periodic cleanup
-        cleanupIfNeeded();
     }
 }

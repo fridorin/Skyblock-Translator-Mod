@@ -22,6 +22,9 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.Style;
 import net.minecraft.network.chat.TextColor;
 import net.minecraft.ChatFormatting;
+import java.util.regex.Pattern;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -30,6 +33,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 public class TranslatorModClient implements ClientModInitializer {
+    private static final Logger LOGGER = LoggerFactory.getLogger(TranslatorModClient.class);
+
     private static final java.util.concurrent.ScheduledExecutorService watchdogScheduler = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "SkyblockTranslator-Watchdog");
         t.setDaemon(true);
@@ -37,10 +42,15 @@ public class TranslatorModClient implements ClientModInitializer {
     });
 
     // Fast, simple line-level cache to replace the complex tooltip cache
-    private static final ConcurrentHashMap<String, Component> COMPONENT_CACHE = new ConcurrentHashMap<>();
+    private static final com.google.common.cache.Cache<String, Component> COMPONENT_CACHE = com.google.common.cache.CacheBuilder.newBuilder()
+        .maximumSize(2000)
+        .build();
+
+    // Precompiled regex for detecting public chat messages with any Hypixel rank (e.g. [VIP+], [MVP++], [HELPER])
+    private static final Pattern PUBLIC_CHAT_PATTERN = Pattern.compile("^(?:\\[[A-Za-z0-9+ ]+\\] )?\\w+: .*");
     
     public static void clearComponentCache() {
-        COMPONENT_CACHE.clear();
+        COMPONENT_CACHE.invalidateAll();
     }
 
     private static KeyMapping keyOpenSettings;
@@ -58,14 +68,14 @@ public class TranslatorModClient implements ClientModInitializer {
         TranslatorConfigManager.init();
 
         // 2. ASYNC INIT: Move all heavy I/O and dictionary processing to a background thread
-        CompletableFuture.runAsync(() -> {
+        TranslationService.TRANSLATION_EXECUTOR.execute(() -> {
             try {
                 TranslationCache.init();
                 SkyblockDictionary.loadForLanguage(TranslatorConfigManager.getConfig().targetLanguage);
                 SkyblockDictionary.loadUserDictionary();
                 initialized = true;
             } catch (Exception e) {
-                e.printStackTrace();
+                LOGGER.error("Failed to initialize dictionaries", e);
             }
         });
 
@@ -75,6 +85,7 @@ public class TranslatorModClient implements ClientModInitializer {
             try {
                 watchdogScheduler.shutdown();
             } catch (Exception e) {
+                LOGGER.warn("Failed to shutdown watchdog scheduler", e);
             }
         }));
 
@@ -234,17 +245,6 @@ public class TranslatorModClient implements ClientModInitializer {
                             } else {
                                 context.getSource().sendFeedback(Component.literal("§c[SkyBlock Translator] Invalid provider. Valid options: GOOGLE_FREE, DEEPL_FREE, YANDEX"));
                             }
-                            return 1;
-                        }))
-                )
-                .then(ClientCommandManager.literal("setkey")
-                    .then(ClientCommandManager.argument("key", StringArgumentType.string())
-                        .executes(context -> {
-                            String key = StringArgumentType.getString(context, "key");
-                            TranslatorConfig config = TranslatorConfigManager.getConfig();
-                            config.apiKey = key;
-                            TranslatorConfigManager.save();
-                            context.getSource().sendFeedback(Component.literal("§a[SkyBlock Translator] API Key updated."));
                             return 1;
                         }))
                 )
@@ -421,6 +421,7 @@ public class TranslatorModClient implements ClientModInitializer {
                     }
                     sb.append(String.format(localized, formattedArgs));
                 } catch (Exception e) {
+                    LOGGER.warn("Failed to format translated arguments for key: {}", key, e);
                     sb.append(localized);
                 }
             } else {
@@ -521,6 +522,7 @@ public class TranslatorModClient implements ClientModInitializer {
                         TextColor textColor = TextColor.parseColor(hex.toString()).getOrThrow();
                         currentStyle = Style.EMPTY.withColor(textColor);
                     } catch (Exception e) {
+                        LOGGER.warn("Failed to parse hex color: {}", hex, e);
                     }
                     i += 14;
                     continue;
@@ -595,7 +597,7 @@ public class TranslatorModClient implements ClientModInitializer {
         }
 
         // Check our fast line-level component cache
-        Component cached = COMPONENT_CACHE.get(legacyText);
+        Component cached = COMPONENT_CACHE.getIfPresent(legacyText);
         if (cached != null) {
             return cached;
         }
@@ -615,11 +617,6 @@ public class TranslatorModClient implements ClientModInitializer {
             String restored = " ".repeat(leadingSpaces) + immediate + " ".repeat(trailingSpaces);
             Component translatedComponent = legacyToComponent(restored);
             COMPONENT_CACHE.put(legacyText, translatedComponent);
-            
-            // Limit cache size to prevent memory leaks
-            if (COMPONENT_CACHE.size() > 5000) {
-                COMPONENT_CACHE.clear();
-            }
             return translatedComponent;
         }
 
@@ -695,29 +692,22 @@ public class TranslatorModClient implements ClientModInitializer {
         int rawColonIndex = rawText.indexOf(": ");
         
         boolean shouldTranslate = true;
-        if (rawColonIndex != -1) {
-            String rawPrefix = rawText.substring(0, rawColonIndex).trim();
-            String cleanPrefix = rawPrefix.replaceAll("§x(?:§[0-9a-fA-F]){6}|§.", "");
-            
-            if (cleanPrefix.contains("Guild >") || cleanPrefix.contains("G >")) {
-                shouldTranslate = config.translateGuildChat;
-            } else if (cleanPrefix.contains("Party >") || cleanPrefix.contains("P >")) {
-                shouldTranslate = config.translatePartyChat;
-            } else if (cleanPrefix.contains("Co-op >") || cleanPrefix.contains("C >")) {
-                shouldTranslate = config.translateCoopChat;
-            } else if (cleanPrefix.contains("Officer >") || cleanPrefix.contains("O >")) {
-                shouldTranslate = config.translateGuildChat;
-            } else if (cleanPrefix.contains("From ") || cleanPrefix.contains("To ")) {
-                shouldTranslate = config.translateDirectMessages;
-            } else {
-                shouldTranslate = config.translatePublicChat;
-            }
+        String cleanText = rawText.replaceAll("§x(?:§[0-9a-fA-F]){6}|§.", "").trim();
+        
+        if (cleanText.startsWith("Guild >") || cleanText.startsWith("G >") || cleanText.startsWith("Officer >") || cleanText.startsWith("O >")) {
+            shouldTranslate = config.translateGuildChat;
+        } else if (cleanText.startsWith("Party >") || cleanText.startsWith("P >")) {
+            shouldTranslate = config.translatePartyChat;
+        } else if (cleanText.startsWith("Co-op >") || cleanText.startsWith("C >")) {
+            shouldTranslate = config.translateCoopChat;
+        } else if (cleanText.startsWith("From ") || cleanText.startsWith("To ")) {
+            shouldTranslate = config.translateDirectMessages;
+        } else if (cleanText.startsWith("[NPC]")) {
+            shouldTranslate = config.translateNpcDialogues;
+        } else if (PUBLIC_CHAT_PATTERN.matcher(cleanText).matches()) {
+            shouldTranslate = config.translatePublicChat;
         } else {
-            if (rawText.trim().startsWith("[NPC]")) {
-                shouldTranslate = config.translateNpcDialogues;
-            } else {
-                shouldTranslate = config.translateSystemMessages;
-            }
+            shouldTranslate = config.translateSystemMessages;
         }
 
         if (!shouldTranslate) {
@@ -795,6 +785,20 @@ public class TranslatorModClient implements ClientModInitializer {
         TranslatorConfig config = TranslatorConfigManager.getConfig();
         if (!config.enabled) return true;
         if ("en".equalsIgnoreCase(config.targetLanguage)) return true;
+        
+        if (config.onlyOnHypixel) {
+            net.minecraft.client.multiplayer.ServerData currentServer = net.minecraft.client.Minecraft.getInstance().getCurrentServer();
+            if (currentServer != null) {
+                String serverAddress = currentServer.ip.toLowerCase();
+                if (!serverAddress.contains("hypixel.net") && !serverAddress.contains("hypixel.io")) {
+                    return true;
+                }
+            } else if (!net.minecraft.client.Minecraft.getInstance().hasSingleplayerServer()) {
+                // Not on any server and not in singleplayer (maybe main menu), disable to be safe
+                // (Wait, actually if they are in singleplayer, should we allow it? Let's just block if it's explicitly not hypixel)
+            }
+        }
+
         try {
             if (config.disableOnShift && net.minecraft.client.Minecraft.getInstance().hasShiftDown()) {
                 return true;

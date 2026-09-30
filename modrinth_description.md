@@ -1,11 +1,13 @@
-# 🌍 SkyBlock Translator (Fabric Mod)
+# 🌍 SkyBlock Translator
 
-[![Minecraft Version](https://img.shields.io/badge/Minecraft-1.21.11%20%7C%2026.1.2%20%7C%2026.2-blue.svg?logo=minecraft&color=62B036)](https://www.minecraft.net/)
+[![Minecraft Version](https://img.shields.io/badge/Minecraft-1.21.11%20%7C%2026.1.2%20%7C%2026.2%20%7C%2026.3-blue.svg?logo=minecraft&color=62B036)](https://www.minecraft.net/)
 [![Loader](https://img.shields.io/badge/Loader-Fabric-lightgrey.svg?logo=fabric&color=E2DBCE)](https://fabricmc.net/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/fridorin/Skyblock-Translator-Mod/blob/main/LICENSE)
 [![GitHub](https://img.shields.io/badge/GitHub-Repository-blue.svg?logo=github)](https://github.com/fridorin/Skyblock-Translator-Mod)
 
-**SkyBlock Translator** is a high-performance, client-side translation mod for Minecraft 1.21.11, 26.1.2, and 26.2, custom-built for **Hypixel SkyBlock**. It translates chat messages, item lore, chest titles, holograms, player tab lists, and entities from English to your target language (default is Russian, with support for 30+ other languages) in real-time.
+**SkyBlock Translator** is a high-performance, client-side translation mod custom-built for **Hypixel SkyBlock**. It translates chat messages, item lore, chest titles, holograms, player tab lists, and entities from English to your target language (default is Russian, with offline support for 30+ other languages) in real-time.
+
+Unlike generic translation mods, SkyBlock Translator understands Hypixel's unique formatting, ensuring your game remains fast, your screen stays clean, and your interactive chat links work flawlessly.
 
 ---
 
@@ -18,14 +20,14 @@
 
 ## 🌟 Key Features
 
-* ⚡ **Asynchronous & Non-Blocking**: Network requests run on a background thread pool. Your game FPS will never drop or stutter while waiting for a translation.
-* 📴 **Instant Offline Translation**: Item stats, common phrases, and enchantments translate instantly offline using local dictionary tables and regex matching.
+* ⚡ **Asynchronous & Non-Blocking**: Network requests run on a dedicated background thread pool. Your game FPS will never drop or stutter while waiting for a translation.
+* 📴 **Instant Offline Translation**: Item stats, common phrases, and enchantments translate instantly offline using local dictionary tables and highly optimized regex matching.
 * 💬 **Smart Chat Display Modes**:
   * `Separate Line (Recommended)`: Outputs translation as a sub-line below the original message, **preserving all original clickable links** (coop invites, auction links, profile IDs).
   * `Hover to Reveal`: Hover over any translated chat message to see the original English text.
 * 🛡️ **Technical Spam Filters**: Automatically filters out combat damage numbers (`12,450 crit`), mod prefixes (NEU, Skytils, SBA), cooldowns, UUIDs, dates, and server IP addresses to conserve API limits.
 * 🛑 **Shift Bypass (Panic Button)**: Hold down the **Shift** key while reading chat or browsing items to instantly view original English text.
-* 🧹 **One-Click Cache Management**: Clear disk caches instantly in-game with sound confirmation and toast notifications.
+* 🧹 **Optimized Memory Management**: Built with bounded LRU caches to prevent memory leaks and ensure stable performance even after hours of gameplay.
 
 ---
 
@@ -45,13 +47,12 @@ All commands can be executed using `/translator` (or Russian alias `/перев�
 | `/translator reload` | Reloads config and local user dictionary files. |
 | `/translator copy-hand` | Copies clean JSON translation template of the item in hand. |
 | `/translator update` | Pulls the latest translation dictionary from GitHub immediately. |
-| `/translator test` | Validates API credentials and checks server latency. |
 
 ---
 
 ## 🎮 Recommended Configuration
 
-Configure settings in the `/translator` YACL GUI menu:
+Configure settings easily via the `/translator` YACL GUI menu:
 
 * ⚙️ **Main Settings**:
   * `Enable Translator`: Master toggle **[Recommended]**
@@ -61,11 +62,9 @@ Configure settings in the `/translator` YACL GUI menu:
   * `Translate Chat`: Master chat switch **[Recommended]**
   * `Chat Display Mode`: `Separate Line` **[Safest / Recommended]**
   * `Hover to Show Original`: Displays original text on hover **[Recommended]**
-  * `Auto-translate Outgoing`: Translates your outgoing chat (RU ➔ EN) with anti-spam delay **[Experimental]**
 * 🖥️ **Interface & Lore**:
   * `Item Descriptions (Lore)`: Translates item lore and stats **[Recommended]**
   * `Item Names`: Translates item titles **[Not Recommended — keep OFF to preserve Auction House/Bazaar search]**
-  * `Translate Enchantment Descriptions`: Translates what an enchantment does **[Recommended]**
   * `Menu/Inventory Titles`: Translates chest titles **[Recommended]**
 
 ---

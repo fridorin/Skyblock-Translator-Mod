@@ -1,11 +1,11 @@
 # 🌍 SkyBlock Translator (Fabric Mod)
 
-[![Minecraft Version](https://img.shields.io/badge/Minecraft-1.21.11%20%7C%2026.1.2%20%7C%2026.2-blue.svg?logo=minecraft&color=62B036)](https://www.minecraft.net/)
+[![Minecraft Version](https://img.shields.io/badge/Minecraft-1.21.11%20%7C%2026.1.2%20%7C%2026.2%20%7C%2026.3-blue.svg?logo=minecraft&color=62B036)](https://www.minecraft.net/)
 [![Loader](https://img.shields.io/badge/Loader-Fabric-lightgrey.svg?logo=fabric&color=E2DBCE)](https://fabricmc.net/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Modrinth](https://img.shields.io/badge/Modrinth-Available-green.svg?logo=modrinth)](https://modrinth.com)
 
-**SkyBlock Translator** is a high-performance, client-side translation mod for Minecraft 1.21.11, 26.1.2, and 26.2, designed specifically for **Hypixel SkyBlock**. The mod translates in-game chat, inventory item tooltips (lore), chest titles, holograms, player tab lists, and entities from English to your target language (default is Russian, with offline support for 30+ other target languages) in real-time.
+**SkyBlock Translator** is a high-performance, client-side translation mod for Minecraft 1.21.x, designed specifically for **Hypixel SkyBlock**. The mod translates in-game chat, inventory item tooltips (lore), chest titles, holograms, player tab lists, and entities from English to your target language (default is Russian, with offline support for 30+ other target languages) in real-time.
 
 Unlike generic translation mods, **SkyBlock Translator** is custom-built to parse the unique layout structures of Hypixel SkyBlock, optimizing performance, saving API limits, preserving interactive elements, and avoiding server bans.
 
@@ -42,7 +42,7 @@ Unlike generic translation mods, **SkyBlock Translator** is custom-built to pars
 *   🔍 **Hover to Reveal Original**: Tooltips are appended to chat translations to show original English text when hovered.
 *   🛡️ **Smart Technical Filters**: Excludes spam, mod-specific outputs (NEU, Skytils, SBA), IP addresses, dates, UUIDs, damage numbers, and copy prompts.
 *   🛑 **Shift-Bypass (Panic Button)**: Simply hold **Shift** while browsing items or reading chat to temporarily suspend all translations and view raw English text.
-*   🧹 **Interactive Cache Management**: Clear cache safely with a single click, instantly hearing a verification sound and seeing a system toast notification in the corner of your screen.
+*   🧹 **Optimized Memory Management**: Built with bounded LRU caches to prevent memory leaks and ensure stable performance even after hours of gameplay.
 
 ---
 
@@ -213,11 +213,11 @@ If you spot incorrect translations or missing terms:
 
 ## 🧩 Building from Source (Multi-Version)
 
-This project uses [Stonecutter](https://stonecutter.kikugie.dev/) to build a single shared codebase against several Minecraft versions (1.21.11, 26.1.2, 26.2) with Fabric Loom. There is no per-version copy of the source — `src/main/` is shared, and version-specific code (when needed) lives inline behind Stonecutter `//? if` comments.
+This project uses [Stonecutter](https://stonecutter.kikugie.dev/) to build a single shared codebase against several Minecraft versions (1.21.11, 26.1.2, 26.2, 26.3) with Fabric Loom. There is no per-version copy of the source — `src/main/` is shared, and version-specific code (when needed) lives inline behind Stonecutter `//? if` comments.
 
 ```bash
 # Build every targeted version in one go
-./gradlew ":1.21.11:build" ":26.1.2:build" ":26.2:build"
+./gradlew ":1.21.11:build" ":26.1.2:build" ":26.2:build" ":26.3:build"
 
 # Or build/run just one version
 ./gradlew ":26.1.2:build"

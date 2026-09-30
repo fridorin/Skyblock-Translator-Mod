@@ -1,11 +1,11 @@
 # 🌍 SkyBlock Translator (Mod Fabric)
 
-[![Version Minecraft](https://img.shields.io/badge/Minecraft-1.21.11%20%7C%2026.1.2%20%7C%2026.2-blue.svg?logo=minecraft&color=62B036)](https://www.minecraft.net/)
+[![Version Minecraft](https://img.shields.io/badge/Minecraft-1.21.11%20%7C%2026.1.2%20%7C%2026.2%20%7C%2026.3-blue.svg?logo=minecraft&color=62B036)](https://www.minecraft.net/)
 [![Chargeur](https://img.shields.io/badge/Loader-Fabric-lightgrey.svg?logo=fabric&color=E2DBCE)](https://fabricmc.net/)
 [![Licence](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Modrinth](https://img.shields.io/badge/Modrinth-Disponible-green.svg?logo=modrinth)](https://modrinth.com)
 
-**SkyBlock Translator** est un mod de traduction client haute performance pour Minecraft 1.21.11, 26.1.2 et 26.2, conçu spécifiquement pour **Hypixel SkyBlock**. Le mod traduit en temps réel le chat, les descriptions d'objets (lore), les titres de coffres, les hologrammes, la liste des joueurs (Tab) et les entités, de l'anglais vers votre langue cible (le russe par défaut, avec un support hors ligne pour plus de 30 autres langues).
+**SkyBlock Translator** est un mod de traduction client haute performance pour Minecraft 1.21.x, conçu spécifiquement pour **Hypixel SkyBlock**. Le mod traduit en temps réel le chat, les descriptions d'objets (lore), les titres de coffres, les hologrammes, la liste des joueurs (Tab) et les entités, de l'anglais vers votre langue cible (le russe par défaut, avec un support hors ligne pour plus de 30 autres langues).
 
 Contrairement aux mods de traduction génériques, **SkyBlock Translator** est spécialement conçu pour analyser les structures particulières de Hypixel SkyBlock, optimisant les performances, économisant les limites d'API, préservant les éléments interactifs et évitant les bannissements de serveur.
 
@@ -43,7 +43,7 @@ Contrairement aux mods de traduction génériques, **SkyBlock Translator** est s
 *   🔍 **Survoler pour révéler l'original** : Des infobulles sont ajoutées aux traductions du chat pour afficher le texte anglais original au survol.
 *   🛡️ **Filtres techniques intelligents** : Exclut le spam, les sorties spécifiques à d'autres mods (NEU, Skytils, SBA), les adresses IP, les dates, les UUID, les chiffres de dégâts et les invites de clic.
 *   🛑 **Contournement via Shift (bouton panique)** : Maintenez simplement **Shift** en consultant des objets ou en lisant le chat pour suspendre temporairement toutes les traductions et voir le texte anglais brut.
-*   🧹 **Gestion interactive du cache** : Videz le cache en toute sécurité d'un simple clic, avec un son de confirmation instantané et une notification système (toast) dans le coin de l'écran.
+*   🧹 **Gestion optimisée de la mémoire** : Intégration de caches LRU limités pour prévenir les fuites de mémoire et garantir des performances stables, même après plusieurs heures de jeu.
 
 ---
 
@@ -223,7 +223,7 @@ Si vous repérez des traductions incorrectes ou des termes manquants :
 
 ## 🧩 Compiler depuis les sources (Multi-version)
 
-Ce projet utilise [Stonecutter](https://stonecutter.kikugie.dev/) pour compiler une base de code unique et partagée pour plusieurs versions de Minecraft (1.21.11, 26.1.2, 26.2) avec Fabric Loom. Il n'y a pas de copie du code source par version — `src/main/` est partagé, et le code spécifique à une version (quand nécessaire) vit directement dans le code via des commentaires Stonecutter `//? if`.
+Ce projet utilise [Stonecutter](https://stonecutter.kikugie.dev/) pour compiler une base de code unique et partagée pour plusieurs versions de Minecraft (1.21.11, 26.1.2, 26.2, 26.3) avec Fabric Loom. Il n'y a pas de copie du code source par version — `src/main/` est partagé, et le code spécifique à une version (quand nécessaire) vit directement dans le code via des commentaires Stonecutter `//? if`.
 
 ```bash
 # Compiler toutes les versions ciblées en une fois

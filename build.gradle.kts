@@ -77,12 +77,17 @@ tasks {
     }
 
     processResources {
+        val fapiVersion = (sc.properties["deps.fabric_api"] as String).substringBefore("+")
+        val yaclVersion = (sc.properties["deps.yacl"] as String).substringBefore("+")
+
         val props = mapOf(
             "id" to modId,
             "name" to modName,
             "version" to modVersion,
             "minecraft" to mcCompat,
-            "java" to "${requiredJava.majorVersion}"
+            "java" to "${requiredJava.majorVersion}",
+            "fabric_api" to fapiVersion,
+            "yacl" to yaclVersion
         )
         inputs.properties(props)
         filesMatching("fabric.mod.json") { expand(props) }

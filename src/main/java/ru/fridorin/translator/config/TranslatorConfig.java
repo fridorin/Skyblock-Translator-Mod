@@ -44,6 +44,7 @@ public class TranslatorConfig {
     public boolean ignoreUrlsAndIps = true;
     public boolean ignoreDatesAndLobbies = true;
     public boolean disableOnShift = true;
+    public boolean onlyOnHypixel = true;
 
     
     public static final String GITHUB_USERNAME = "fridorin";
