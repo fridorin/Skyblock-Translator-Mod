@@ -63,7 +63,7 @@ public class TranslationCache {
 
     public static String get(String text) {
         if (text == null) return null;
-        String lower = text.trim().toLowerCase();
+        String lower = text.trim().toLowerCase(java.util.Locale.ROOT);
         return lruCache.getIfPresent(lower);
     }
 
@@ -74,12 +74,12 @@ public class TranslationCache {
         if (trimmedOrig.isEmpty() || trimmedTrans.isEmpty() || trimmedOrig.equalsIgnoreCase(trimmedTrans)) return;
         
         String targetLang = ru.fridorin.translator.config.TranslatorConfigManager.getConfig().targetLanguage;
-        if (!"en".equalsIgnoreCase(targetLang) && ru.fridorin.translator.service.SkyblockDictionary.isHybrid(trimmedTrans)) {
+        if ("ru".equalsIgnoreCase(targetLang) && ru.fridorin.translator.service.SkyblockDictionary.isHybrid(trimmedTrans)) {
             return;
         }
 
         synchronized (SCHEDULER_LOCK) {
-            lruCache.put(trimmedOrig.toLowerCase(), trimmedTrans);
+            lruCache.put(trimmedOrig.toLowerCase(java.util.Locale.ROOT), trimmedTrans);
             isDirty = true;
         }
         scheduleSave();
@@ -94,7 +94,7 @@ public class TranslationCache {
             Map<String, String> loaded = GSON.fromJson(reader, type);
             if (loaded != null) {
                 String targetLang = ru.fridorin.translator.config.TranslatorConfigManager.getConfig().targetLanguage;
-                boolean checkHybrid = !"en".equalsIgnoreCase(targetLang);
+                boolean checkHybrid = "ru".equalsIgnoreCase(targetLang);
                 int count = 0;
                 for (Map.Entry<String, String> entry : loaded.entrySet()) {
                     if (count >= MAX_SIZE) {
@@ -108,7 +108,7 @@ public class TranslationCache {
                         isDirty = true;
                         continue;
                     }
-                    lruCache.put(key.toLowerCase(), val);
+                    lruCache.put(key.toLowerCase(java.util.Locale.ROOT), val);
                     count++;
                 }
             }
@@ -138,6 +138,7 @@ public class TranslationCache {
             }
             java.nio.file.Files.move(tempFile.toPath(), cacheFile.toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException e) {
+            isDirty = true;
             LOGGER.error("Failed to save translation cache", e);
         }
     }

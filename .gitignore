@@ -36,6 +36,7 @@ run/
 
 versions/*/.gradle/
 versions/*/build/
+versions/*/logs/
 .stonecutter-cache/
 
 # java

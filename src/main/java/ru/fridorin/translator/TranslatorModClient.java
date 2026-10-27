@@ -45,12 +45,22 @@ public class TranslatorModClient implements ClientModInitializer {
     private static final com.google.common.cache.Cache<String, Component> COMPONENT_CACHE = com.google.common.cache.CacheBuilder.newBuilder()
         .maximumSize(2000)
         .build();
+    private static final com.google.common.cache.Cache<String, Boolean> PENDING_COMPONENTS = com.google.common.cache.CacheBuilder.newBuilder()
+        .maximumSize(2000)
+        .expireAfterWrite(10, TimeUnit.SECONDS)
+        .build();
 
     // Precompiled regex for detecting public chat messages with any Hypixel rank (e.g. [VIP+], [MVP++], [HELPER])
     private static final Pattern PUBLIC_CHAT_PATTERN = Pattern.compile("^(?:\\[[A-Za-z0-9+ ]+\\] )?\\w+: .*");
     
+    private static final java.util.concurrent.atomic.AtomicLong CACHE_GENERATION = new java.util.concurrent.atomic.AtomicLong();
+
+    public static long getCacheGeneration() { return CACHE_GENERATION.get(); }
+
     public static void clearComponentCache() {
+        CACHE_GENERATION.incrementAndGet();
         COMPONENT_CACHE.invalidateAll();
+        PENDING_COMPONENTS.invalidateAll();
     }
 
     private static KeyMapping keyOpenSettings;
@@ -251,6 +261,7 @@ public class TranslatorModClient implements ClientModInitializer {
                 .then(ClientCommandManager.literal("clear-cache")
                     .executes(context -> {
                         TranslationCache.clear();
+                        clearComponentCache();
                         context.getSource().sendFeedback(Component.literal("§a[SkyBlock Translator] Translation cache cleared."));
                         return 1;
                     })
@@ -258,7 +269,10 @@ public class TranslatorModClient implements ClientModInitializer {
                 .then(ClientCommandManager.literal("reload")
                     .executes(context -> {
                         TranslatorConfigManager.load();
+                        TranslationCache.loadForLanguage(TranslatorConfigManager.getConfig().targetLanguage);
+                        SkyblockDictionary.loadForLanguage(TranslatorConfigManager.getConfig().targetLanguage);
                         SkyblockDictionary.loadUserDictionary();
+                        clearComponentCache();
                         context.getSource().sendFeedback(Component.literal("§a[SkyBlock Translator] Configuration and user dictionary reloaded."));
                         return 1;
                     })
@@ -573,7 +587,7 @@ public class TranslatorModClient implements ClientModInitializer {
 
     public static Component translateComponentWithIgnore(Component component, String ignoreText) {
         if (component == null) return component;
-        if (isTranslationDisabled()) {
+        if (isTranslationDisabled() || TranslationService.isBypassed() || bypassTranslation) {
             return component;
         }
 
@@ -596,18 +610,17 @@ public class TranslatorModClient implements ClientModInitializer {
             return component;
         }
 
-        // Check our fast line-level component cache
-        Component cached = COMPONENT_CACHE.getIfPresent(legacyText);
-        if (cached != null) {
-            return cached;
-        }
-
         if (ignoreText != null && !ignoreText.trim().isEmpty()) {
             String cleanIgnore = ignoreText.trim();
             if (trimmed.equalsIgnoreCase(cleanIgnore) || trimmed.replaceAll("§x(?:§[0-9a-fA-F]){6}|§.", "").trim().equalsIgnoreCase(cleanIgnore)) {
                 return component;
             }
         }
+
+        final long generation = getCacheGeneration();
+        final String cacheKey = generation + ":" + legacyText;
+        Component cached = COMPONENT_CACHE.getIfPresent(cacheKey);
+        if (cached != null) return cached;
 
         String immediate = TranslationService.getImmediateTranslation(trimmed);
         if (immediate != null) {
@@ -616,19 +629,20 @@ public class TranslatorModClient implements ClientModInitializer {
             }
             String restored = " ".repeat(leadingSpaces) + immediate + " ".repeat(trailingSpaces);
             Component translatedComponent = legacyToComponent(restored);
-            COMPONENT_CACHE.put(legacyText, translatedComponent);
+            COMPONENT_CACHE.put(cacheKey, translatedComponent);
             return translatedComponent;
         }
 
         final int finalLeadingSpaces = leadingSpaces;
         final int finalTrailingSpaces = trailingSpaces;
 
+        if (PENDING_COMPONENTS.asMap().putIfAbsent(cacheKey, true) != null) return component;
         TranslationService.translateAsync(trimmed).thenAccept(translatedLegacy -> {
             if (translatedLegacy != null && !translatedLegacy.trim().isEmpty() && !translatedLegacy.equals(trimmed)) {
                 String restored = " ".repeat(finalLeadingSpaces) + translatedLegacy + " ".repeat(finalTrailingSpaces);
-                COMPONENT_CACHE.put(legacyText, legacyToComponent(restored));
+                if (generation == getCacheGeneration()) COMPONENT_CACHE.put(cacheKey, legacyToComponent(restored));
             }
-        });
+        }).whenComplete((result, error) -> PENDING_COMPONENTS.invalidate(cacheKey));
         
         return component;
     }
@@ -656,6 +670,11 @@ public class TranslatorModClient implements ClientModInitializer {
         if (trimmed.isEmpty() || TranslationService.containsNonEnglishLetters(trimmed) || !TranslationService.containsLetters(trimmed)) {
             return CompletableFuture.completedFuture(component);
         }
+
+        final long generation = getCacheGeneration();
+        final String cacheKey = generation + ":" + legacyText;
+        Component cached = COMPONENT_CACHE.getIfPresent(cacheKey);
+        if (cached != null) return CompletableFuture.completedFuture(cached);
 
         String immediate = TranslationService.getImmediateTranslation(trimmed);
         if (immediate != null) {

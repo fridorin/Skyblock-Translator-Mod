@@ -24,7 +24,7 @@ public class SkyblockDictionary {
     private static final Map<String, String> ITEM_TYPES = new ConcurrentHashMap<>();
     private static final Map<String, String> ITEM_TYPES_GENDER = new ConcurrentHashMap<>();
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-    private static String activeLanguage = "ru";
+    private static volatile String activeLanguage = "ru";
 
     public static final java.util.Set<String> DEFAULT_NPC_NAMES = java.util.Set.of(
         "jerry", "kat", "elizabeth", "maddox", "ophelia", "malik", "mort", "anita", "jacob", "taylor", 
@@ -52,7 +52,7 @@ public class SkyblockDictionary {
     public static boolean isNpcName(String text) {
         if (text == null) return false;
         String clean = text.replaceAll("§x(?:§[0-9a-fA-F]){6}|§.", "");
-        clean = clean.toLowerCase().replaceAll("[^a-z\\s]", "").trim();
+        clean = clean.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z\\s]", "").trim();
         if (clean.isEmpty()) return false;
         if (DEFAULT_NPC_NAMES.contains(clean) || DYNAMIC_NPC_NAMES.contains(clean)) return true;
         
@@ -75,13 +75,13 @@ public class SkyblockDictionary {
         String globalNpcs = DICTIONARY.get("npc_names_list");
         if (globalNpcs != null) {
             for (String name : globalNpcs.split(",")) {
-                DYNAMIC_NPC_NAMES.add(name.trim().toLowerCase());
+                DYNAMIC_NPC_NAMES.add(name.trim().toLowerCase(java.util.Locale.ROOT));
             }
         }
         String userNpcs = USER_DICTIONARY.get("npc_names_list");
         if (userNpcs != null) {
             for (String name : userNpcs.split(",")) {
-                DYNAMIC_NPC_NAMES.add(name.trim().toLowerCase());
+                DYNAMIC_NPC_NAMES.add(name.trim().toLowerCase(java.util.Locale.ROOT));
             }
         }
 
@@ -89,34 +89,34 @@ public class SkyblockDictionary {
         String globalWords = DICTIONARY.get("allowed_english_words_list");
         if (globalWords != null) {
             for (String word : globalWords.split(",")) {
-                DYNAMIC_ALLOWED_ENGLISH_WORDS.add(word.trim().toLowerCase());
+                DYNAMIC_ALLOWED_ENGLISH_WORDS.add(word.trim().toLowerCase(java.util.Locale.ROOT));
             }
         }
         String userWords = USER_DICTIONARY.get("allowed_english_words_list");
         if (userWords != null) {
             for (String word : userWords.split(",")) {
-                DYNAMIC_ALLOWED_ENGLISH_WORDS.add(word.trim().toLowerCase());
+                DYNAMIC_ALLOWED_ENGLISH_WORDS.add(word.trim().toLowerCase(java.util.Locale.ROOT));
             }
         }
     }
 
     public static String getVal(String key) {
         if (key == null) return null;
-        return DICTIONARY.get(key.toLowerCase());
+        return DICTIONARY.get(key.toLowerCase(java.util.Locale.ROOT));
     }
 
     private static String getRarityTranslation(String rarity, String gender) {
         boolean isVery = rarity.startsWith("VERY ");
         String baseRarity = isVery ? rarity.substring(5) : rarity;
         
-        String genderKey = "rarity." + baseRarity.toLowerCase() + "." + (gender != null ? gender.toLowerCase() : "m");
+        String genderKey = "rarity." + baseRarity.toLowerCase(java.util.Locale.ROOT) + "." + (gender != null ? gender.toLowerCase(java.util.Locale.ROOT) : "m");
         String translation = DICTIONARY.get(genderKey);
         
         if (translation == null) {
-            translation = DICTIONARY.get("rarity." + baseRarity.toLowerCase());
+            translation = DICTIONARY.get("rarity." + baseRarity.toLowerCase(java.util.Locale.ROOT));
         }
         if (translation == null) {
-            translation = DICTIONARY.get(baseRarity.toLowerCase());
+            translation = DICTIONARY.get(baseRarity.toLowerCase(java.util.Locale.ROOT));
         }
         if (translation == null) {
             translation = baseRarity;
@@ -128,10 +128,10 @@ public class SkyblockDictionary {
             if (veryTrans == null) {
                 veryTrans = "VERY";
             }
-            prefix = veryTrans.toUpperCase() + " ";
+            prefix = veryTrans.toUpperCase(java.util.Locale.ROOT) + " ";
         }
 
-        return prefix + translation.toUpperCase();
+        return prefix + translation.toUpperCase(java.util.Locale.ROOT);
     }
 
     public static String cleanPlaceholders(String text) {
@@ -146,13 +146,15 @@ public class SkyblockDictionary {
 
     private static String restoreLookupFormat(String original, String cleanText, String translated) {
         if (original == null || cleanText == null || cleanText.isEmpty()) return original;
-        String lowerOrig = original.toLowerCase();
-        String lowerClean = cleanText.toLowerCase();
+        String lowerOrig = original.toLowerCase(java.util.Locale.ROOT);
+        String lowerClean = cleanText.toLowerCase(java.util.Locale.ROOT);
         int idx = lowerOrig.indexOf(lowerClean);
         if (idx != -1) {
             return original.substring(0, idx) + translated + original.substring(idx + cleanText.length());
         }
-        return original.replace(cleanText, translated);
+        java.util.regex.Matcher leading = java.util.regex.Pattern.compile("^(?:\\{F\\d+\\}|§.)*").matcher(original);
+        leading.find();
+        return leading.group() + translated;
     }
 
     private static String getWordBoundaryRegex(String key) {
@@ -177,7 +179,7 @@ public class SkyblockDictionary {
         java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("[a-zA-Z]+");
         java.util.regex.Matcher matcher = pattern.matcher(clean);
         while (matcher.find()) {
-            String word = matcher.group().toLowerCase();
+            String word = matcher.group().toLowerCase(java.util.Locale.ROOT);
             if (!DEFAULT_ALLOWED_ENGLISH_WORDS.contains(word) && !DYNAMIC_ALLOWED_ENGLISH_WORDS.contains(word)) {
                 return true;
             }
@@ -235,7 +237,7 @@ public class SkyblockDictionary {
         if (entries == null || entries.isEmpty()) return null;
 
         String result = text;
-        String lowerResult = result.toLowerCase();
+        String lowerResult = result.toLowerCase(java.util.Locale.ROOT);
         boolean changed = false;
         for (PhraseEntry entry : entries) {
             // Quick contains() check before running regex (much cheaper)
@@ -245,12 +247,12 @@ public class SkyblockDictionary {
             java.util.regex.Matcher matcher = entry.pattern.matcher(result);
             if (matcher.find()) {
                 result = matcher.replaceAll(java.util.regex.Matcher.quoteReplacement(entry.translation));
-                lowerResult = result.toLowerCase();
+                lowerResult = result.toLowerCase(java.util.Locale.ROOT);
                 changed = true;
             }
         }
         if (changed) {
-            if (isHybrid(result)) {
+            if ("ru".equalsIgnoreCase(activeLanguage) && isHybrid(result)) {
                 return null;
             }
             return result;
@@ -275,6 +277,7 @@ public class SkyblockDictionary {
      * Rebuild the regex pattern caches. Must be called whenever dictionaries change.
      */
     static void rebuildRegexCache() {
+        ru.fridorin.translator.TranslatorModClient.clearComponentCache();
         cachedUserRegex = buildRegexEntries(USER_DICTIONARY);
         cachedDictRegex = buildRegexEntries(DICTIONARY);
     }
@@ -321,12 +324,12 @@ public class SkyblockDictionary {
         String cleanText = cleanPlaceholders(trimmed);
         if (cleanText.isEmpty()) return null;
 
-        String userMatch = USER_DICTIONARY.get(cleanText.toLowerCase());
+        String userMatch = USER_DICTIONARY.get(cleanText.toLowerCase(java.util.Locale.ROOT));
         if (userMatch != null) {
             return restoreLookupFormat(trimmed, cleanText, userMatch);
         }
 
-        String match = DICTIONARY.get(cleanText.toLowerCase());
+        String match = DICTIONARY.get(cleanText.toLowerCase(java.util.Locale.ROOT));
         if (match != null) {
             return restoreLookupFormat(trimmed, cleanText, match);
         }
@@ -353,7 +356,7 @@ public class SkyblockDictionary {
     }
 
     private static String tryTranslateRarityAndType(String original, String cleanText) {
-        String upperText = cleanText.toUpperCase().trim();
+        String upperText = cleanText.toUpperCase(java.util.Locale.ROOT).trim();
         String baseLine = upperText.replaceAll("^[^A-Z]+", "").replaceAll("[^A-Z]+$", "").trim();
 
         String foundRarity = null;
@@ -391,7 +394,7 @@ public class SkyblockDictionary {
                     .replace("{rarity}", translatedRarity)
                     .replace("{type}", translatedType);
                 
-                int idx = cleanText.toUpperCase().indexOf(baseLine);
+                int idx = cleanText.toUpperCase(java.util.Locale.ROOT).indexOf(baseLine);
                 String cleanRarityLine = cleanText.substring(0, idx) + translatedRarityText + cleanText.substring(idx + baseLine.length());
                 return restoreLookupFormat(original, cleanText, cleanRarityLine);
             }
@@ -401,7 +404,7 @@ public class SkyblockDictionary {
         if (colonIndex != -1) {
             String key = cleanText.substring(0, colonIndex).trim();
             String value = cleanText.substring(colonIndex + 1).trim();
-            String translatedKey = DICTIONARY.get(key.toLowerCase());
+            String translatedKey = DICTIONARY.get(key.toLowerCase(java.util.Locale.ROOT));
             if (translatedKey != null) {
                 int origColonIdx = original.indexOf(":");
                 if (origColonIdx != -1) {
@@ -415,19 +418,19 @@ public class SkyblockDictionary {
             }
         }
 
-        if (cleanText.toLowerCase().startsWith("requires ") || cleanText.toLowerCase().startsWith("requires:")) {
+        if (cleanText.toLowerCase(java.util.Locale.ROOT).startsWith("requires ") || cleanText.toLowerCase(java.util.Locale.ROOT).startsWith("requires:")) {
             String cleanRequirement = cleanText;
-            if (cleanRequirement.toLowerCase().startsWith("requires:")) {
+            if (cleanRequirement.toLowerCase(java.util.Locale.ROOT).startsWith("requires:")) {
                 cleanRequirement = cleanRequirement.substring(9).trim();
             } else {
                 cleanRequirement = cleanRequirement.substring(9).trim();
             }
 
-            int levelIndex = cleanRequirement.toLowerCase().indexOf(" level ");
+            int levelIndex = cleanRequirement.toLowerCase(java.util.Locale.ROOT).indexOf(" level ");
             if (levelIndex != -1) {
                 String skillName = cleanRequirement.substring(0, levelIndex).trim();
                 String levelVal = cleanRequirement.substring(levelIndex + 7).trim();
-                String translatedSkill = DICTIONARY.get(skillName.toLowerCase());
+                String translatedSkill = DICTIONARY.get(skillName.toLowerCase(java.util.Locale.ROOT));
                 if (translatedSkill == null) translatedSkill = skillName;
 
                 String skillFormat = DICTIONARY.get("requirement_skill_format");
@@ -443,7 +446,7 @@ public class SkyblockDictionary {
                 if (lastSpace != -1) {
                     String slayerName = cleanRequirement.substring(0, lastSpace).trim();
                     String slayerLevel = cleanRequirement.substring(lastSpace + 1).trim();
-                    String translatedSlayer = DICTIONARY.get(slayerName.toLowerCase());
+                    String translatedSlayer = DICTIONARY.get(slayerName.toLowerCase(java.util.Locale.ROOT));
                     if (translatedSlayer == null) translatedSlayer = slayerName;
 
                     String slayerFormat = DICTIONARY.get("requirement_slayer_format");
@@ -467,7 +470,7 @@ public class SkyblockDictionary {
         String cleanVal = cleanPlaceholders(trimmed);
         if (cleanVal.isEmpty()) return valueStr;
         
-        String lowerClean = cleanVal.toLowerCase();
+        String lowerClean = cleanVal.toLowerCase(java.util.Locale.ROOT);
         
         
         String userMatch = USER_DICTIONARY.get(lowerClean);
@@ -536,11 +539,11 @@ public class SkyblockDictionary {
             String value = entry.getValue();
             
             if (key.startsWith("item_type.")) {
-                String typeName = key.substring(10).trim().toUpperCase();
+                String typeName = key.substring(10).trim().toUpperCase(java.util.Locale.ROOT);
                 ITEM_TYPES.put(typeName, value);
             } else if (key.startsWith("item_gender.")) {
-                String typeName = key.substring(12).trim().toUpperCase();
-                ITEM_TYPES_GENDER.put(typeName, value.toUpperCase());
+                String typeName = key.substring(12).trim().toUpperCase(java.util.Locale.ROOT);
+                ITEM_TYPES_GENDER.put(typeName, value.toUpperCase(java.util.Locale.ROOT));
             }
         }
 
@@ -562,7 +565,7 @@ public class SkyblockDictionary {
                 if (loaded != null) {
                     for (Map.Entry<String, String> entry : loaded.entrySet()) {
                         if (entry.getKey() != null && entry.getValue() != null) {
-                            DICTIONARY.put(entry.getKey().toLowerCase().trim(), entry.getValue().trim());
+                            DICTIONARY.put(entry.getKey().toLowerCase(java.util.Locale.ROOT).trim(), entry.getValue().trim());
                         }
                     }
                 }
@@ -580,7 +583,7 @@ public class SkyblockDictionary {
                     String key = entry.getKey();
                     String value = entry.getValue();
                     if (key != null && value != null) {
-                        DICTIONARY.put(key.toLowerCase().trim(), value.trim());
+                        DICTIONARY.put(key.toLowerCase(java.util.Locale.ROOT).trim(), value.trim());
                     }
                 }
             }
@@ -638,12 +641,12 @@ public class SkyblockDictionary {
                     if (response.statusCode() == 200) {
                         Type type = new TypeToken<Map<String, String>>(){}.getType();
                         Map<String, String> downloaded = GSON.fromJson(response.body(), type);
-                        if (downloaded != null && !downloaded.isEmpty()) {
+                        if (downloaded != null && !downloaded.isEmpty() && lang.equals(activeLanguage)) {
                             for (Map.Entry<String, String> entry : downloaded.entrySet()) {
                                 String key = entry.getKey();
                                 String value = entry.getValue();
                                 if (key != null && value != null) {
-                                    DICTIONARY.put(key.toLowerCase().trim(), value.trim());
+                                    DICTIONARY.put(key.toLowerCase(java.util.Locale.ROOT).trim(), value.trim());
                                 }
                             }
                             File dictFile = FabricLoader.getInstance().getConfigDir().resolve("skyblock_translator/dictionary_" + lang + ".json").toFile();
@@ -703,7 +706,7 @@ public class SkyblockDictionary {
                         USER_DICTIONARY.clear();
                         for (Map.Entry<String, String> entry : loaded.entrySet()) {
                             if (entry.getKey() != null && entry.getValue() != null && !entry.getKey().equals("info")) {
-                                USER_DICTIONARY.put(entry.getKey().toLowerCase().trim(), entry.getValue().trim());
+                                USER_DICTIONARY.put(entry.getKey().toLowerCase(java.util.Locale.ROOT).trim(), entry.getValue().trim());
                             }
                         }
                     }
@@ -717,7 +720,7 @@ public class SkyblockDictionary {
 
     public static void addUserTranslation(String english, String translation) {
         if (english == null || translation == null) return;
-        String trimmedEng = english.trim().toLowerCase();
+        String trimmedEng = english.trim().toLowerCase(java.util.Locale.ROOT);
         String trimmedTrans = translation.trim();
         if (trimmedEng.isEmpty() || trimmedTrans.isEmpty()) return;
 
@@ -736,7 +739,7 @@ public class SkyblockDictionary {
                     if (loaded != null) {
                         for (Map.Entry<String, String> entry : loaded.entrySet()) {
                             if (entry.getKey() != null && entry.getValue() != null && !entry.getKey().equalsIgnoreCase("info")) {
-                                currentDict.put(entry.getKey().toLowerCase().trim(), entry.getValue().trim());
+                                currentDict.put(entry.getKey().toLowerCase(java.util.Locale.ROOT).trim(), entry.getValue().trim());
                             }
                         }
                     }
@@ -750,13 +753,14 @@ public class SkyblockDictionary {
                 GSON.toJson(currentDict, writer);
             }
             updateDynamicLists();
+            rebuildRegexCache();
         } catch (Exception e) {
         }
     }
 
     public static String getTranslationOrUserTranslation(String key) {
         if (key == null) return null;
-        String lower = key.trim().toLowerCase();
+        String lower = key.trim().toLowerCase(java.util.Locale.ROOT);
         String userMatch = USER_DICTIONARY.get(lower);
         if (userMatch != null) return userMatch + " §e(User Dictionary)§r";
         String dictMatch = DICTIONARY.get(lower);

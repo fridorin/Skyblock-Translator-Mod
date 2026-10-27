@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/fridorin/Skyblock-Translator-Mod/blob/main/LICENSE)
 [![GitHub](https://img.shields.io/badge/GitHub-Repository-blue.svg?logo=github)](https://github.com/fridorin/Skyblock-Translator-Mod)
 
-**SkyBlock Translator** is a high-performance, client-side translation mod custom-built for **Hypixel SkyBlock**. It translates chat messages, item lore, chest titles, holograms, player tab lists, and entities from English to your target language (default is Russian, with offline support for 30+ other languages) in real-time.
+**SkyBlock Translator** is a high-performance, client-side translation mod custom-built for **Hypixel SkyBlock**. It translates chat messages, item lore, chest titles, holograms, player tab lists, and entities from English to your target language (default is Russian, with bundled Russian and French dictionaries and online translation for 30+ languages) in real-time.
 
 Unlike generic translation mods, SkyBlock Translator understands Hypixel's unique formatting, ensuring your game remains fast, your screen stays clean, and your interactive chat links work flawlessly.
 

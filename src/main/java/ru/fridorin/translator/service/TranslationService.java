@@ -72,25 +72,21 @@ public class TranslationService {
     private static final ThreadLocal<Boolean> BYPASS_TRANSLATION = ThreadLocal.withInitial(() -> false);
 
     public static void runWithBypass(Runnable action) {
+        boolean previous = BYPASS_TRANSLATION.get();
         BYPASS_TRANSLATION.set(true);
-        try { action.run(); } finally { BYPASS_TRANSLATION.set(false); }
+        try { action.run(); } finally { BYPASS_TRANSLATION.set(previous); }
     }
 
     public static <T> T callWithBypass(java.util.function.Supplier<T> action) {
+        boolean previous = BYPASS_TRANSLATION.get();
         BYPASS_TRANSLATION.set(true);
-        try { return action.get(); } finally { BYPASS_TRANSLATION.set(false); }
+        try { return action.get(); } finally { BYPASS_TRANSLATION.set(previous); }
     }
 
     public static boolean isBypassed() { return BYPASS_TRANSLATION.get(); }
 
     private static volatile long lastFailedCleanup = 0;
     private static final long FAILED_CLEANUP_INTERVAL = 30000;
-
-    private static void markApiError(String text) {
-        if (text != null) {
-            FAILED_TRANSLATIONS.put(text.trim(), System.currentTimeMillis() + 10000); // 10s cooldown
-        }
-    }
 
     private static void cleanupFailedTranslations() {
         long now = System.currentTimeMillis();
@@ -311,6 +307,8 @@ public class TranslationService {
 
     public static CompletableFuture<String> translateAsync(String text) {
         TranslatorConfig config = TranslatorConfigManager.getConfig();
+        final String targetLanguage = config.targetLanguage;
+        final long generation = ru.fridorin.translator.TranslatorModClient.getCacheGeneration();
         if (!config.enabled || text == null || text.trim().isEmpty()) return CompletableFuture.completedFuture("");
         if ("en".equalsIgnoreCase(config.targetLanguage)) return CompletableFuture.completedFuture(text);
 
@@ -343,9 +341,10 @@ public class TranslationService {
                     // Check isTechnicalOrModLine ONLY before API call — dictionary/cache lookups above must still work
                     if (isTechnicalOrModLine(fmtResult.templatedText)) return CompletableFuture.completedFuture(text);
                     String trimmedTemplate = template.templatedText.trim();
-                    Long blockTime = FAILED_TRANSLATIONS.get(trimmedTemplate);
+                    String requestKey = generation + ":" + targetLanguage + ":" + trimmedTemplate;
+                    Long blockTime = FAILED_TRANSLATIONS.get(requestKey);
                     if (blockTime != null && System.currentTimeMillis() < blockTime) return CompletableFuture.completedFuture(text);
-                    if (blockTime != null) FAILED_TRANSLATIONS.remove(trimmedTemplate);
+                    if (blockTime != null) FAILED_TRANSLATIONS.remove(requestKey);
 
                     // Reject if too many active translations (prevents memory leak)
                     if (ACTIVE_TRANSLATIONS.size() >= MAX_ACTIVE_TRANSLATIONS) {
@@ -354,21 +353,24 @@ public class TranslationService {
 
                     // Use putIfAbsent to avoid deadlock in computeIfAbsent
                     CompletableFuture<String> newFuture = new CompletableFuture<>();
-                    CompletableFuture<String> existing = ACTIVE_TRANSLATIONS.putIfAbsent(trimmedTemplate, newFuture);
+                    CompletableFuture<String> existing = ACTIVE_TRANSLATIONS.putIfAbsent(requestKey, newFuture);
                     if (existing != null) {
                         translationFuture = existing;
                     } else {
-                        ACTIVE_TRANSLATIONS_TIMESTAMPS.put(trimmedTemplate, System.currentTimeMillis());
+                        ACTIVE_TRANSLATIONS_TIMESTAMPS.put(requestKey, System.currentTimeMillis());
                         translationFuture = newFuture;
-                        requestApiTranslation(trimmedTemplate, config, config.targetLanguage).orTimeout(8, TimeUnit.SECONDS).handle((res, err) -> {
-                            ACTIVE_TRANSLATIONS.remove(trimmedTemplate);
-                            ACTIVE_TRANSLATIONS_TIMESTAMPS.remove(trimmedTemplate);
+                        requestApiTranslation(trimmedTemplate, config, targetLanguage).orTimeout(8, TimeUnit.SECONDS).handle((res, err) -> {
+                            ACTIVE_TRANSLATIONS.remove(requestKey, newFuture);
+                            ACTIVE_TRANSLATIONS_TIMESTAMPS.remove(requestKey);
                             if (err != null || res == null || res.trim().isEmpty() || res.startsWith("[")) {
-                                if (err != null || (res != null && res.contains("Error"))) markApiError(trimmedTemplate);
-                                newFuture.complete(res != null ? res : "");
+                                FAILED_TRANSLATIONS.put(requestKey, System.currentTimeMillis() + (err == null && (res == null || res.isBlank()) ? 1000 : 10000));
+                                newFuture.complete("");
                             } else {
                                 String normalized = cleanPunctuationSpaces(normalizePlaceholders(res));
-                                TranslationCache.put(trimmedTemplate, normalized);
+                                if (generation == ru.fridorin.translator.TranslatorModClient.getCacheGeneration()
+                                        && targetLanguage.equals(TranslatorConfigManager.getConfig().targetLanguage)) {
+                                    TranslationCache.put(trimmedTemplate, normalized);
+                                }
                                 newFuture.complete(normalized);
                                 // Notify tooltip cache that new translations are available
                                 notifyTooltipCacheInvalidation();
@@ -381,6 +383,7 @@ public class TranslationService {
         }
 
         return translationFuture.thenApply(translatedTemplate -> {
+            if (generation != ru.fridorin.translator.TranslatorModClient.getCacheGeneration()) return text;
             String res = restoreTemplates(translatedTemplate, template.values);
             res = restoreCommands(res, commandTemplate.commands);
             res = restorePlayerNames(res, playerTemplate.playerNames);
@@ -389,14 +392,18 @@ public class TranslationService {
     }
 
     private static CompletableFuture<String> requestApiTranslation(String text, TranslatorConfig config, String targetLang) {
-        if ("DEEPL_FREE".equalsIgnoreCase(config.apiProvider)) {
-            if (config.apiKey == null || config.apiKey.trim().isEmpty()) { warnMissingKey("DeepL"); return translateGoogleFreeAsync(text, targetLang); }
-            return translateDeepLAsync(text, targetLang, config.apiKey).thenCompose(res -> res.startsWith("[") ? translateGoogleFreeAsync(text, targetLang) : CompletableFuture.completedFuture(res));
-        } else if ("YANDEX".equalsIgnoreCase(config.apiProvider)) {
-            if (config.apiKey == null || config.apiKey.trim().isEmpty()) { warnMissingKey("Yandex"); return translateGoogleFreeAsync(text, targetLang); }
-            return translateYandexAsync(text, targetLang, config.apiKey).thenCompose(res -> res.startsWith("[") ? translateGoogleFreeAsync(text, targetLang) : CompletableFuture.completedFuture(res));
+        try {
+            if ("DEEPL_FREE".equalsIgnoreCase(config.apiProvider)) {
+                if (config.apiKey == null || config.apiKey.trim().isEmpty()) { warnMissingKey("DeepL"); return translateGoogleFreeAsync(text, targetLang); }
+                return translateDeepLAsync(text, targetLang, config.apiKey).thenCompose(res -> res.startsWith("[") ? translateGoogleFreeAsync(text, targetLang) : CompletableFuture.completedFuture(res));
+            } else if ("YANDEX".equalsIgnoreCase(config.apiProvider)) {
+                if (config.apiKey == null || config.apiKey.trim().isEmpty()) { warnMissingKey("Yandex"); return translateGoogleFreeAsync(text, targetLang); }
+                return translateYandexAsync(text, targetLang, config.apiKey).thenCompose(res -> res.startsWith("[") ? translateGoogleFreeAsync(text, targetLang) : CompletableFuture.completedFuture(res));
+            }
+            return translateGoogleFreeAsync(text, targetLang);
+        } catch (Exception e) {
+            return CompletableFuture.failedFuture(e);
         }
-        return translateGoogleFreeAsync(text, targetLang);
     }
 
     public static CompletableFuture<String> translateOutgoingAsync(String text) {
@@ -431,10 +438,10 @@ public class TranslationService {
     }
 
     private static CompletableFuture<String> translateDeepLAsync(String text, String targetLang, String apiKey) {
+        HttpRequest request = HttpRequest.newBuilder().uri(URI.create("https://api-free.deepl.com/v2/translate")).header("Authorization", "DeepL-Auth-Key " + apiKey).header("Content-Type", "application/x-www-form-urlencoded").timeout(Duration.ofSeconds(5)).POST(HttpRequest.BodyPublishers.ofString("text=" + URLEncoder.encode(text, StandardCharsets.UTF_8) + "&target_lang=" + targetLang.toUpperCase())).build();
         if (!API_SEMAPHORE.tryAcquire()) {
             return CompletableFuture.completedFuture("");
         }
-        HttpRequest request = HttpRequest.newBuilder().uri(URI.create("https://api-free.deepl.com/v2/translate")).header("Authorization", "DeepL-Auth-Key " + apiKey).header("Content-Type", "application/x-www-form-urlencoded").timeout(Duration.ofSeconds(5)).POST(HttpRequest.BodyPublishers.ofString("text=" + URLEncoder.encode(text, StandardCharsets.UTF_8) + "&target_lang=" + targetLang.toUpperCase())).build();
         return HTTP_CLIENT.sendAsync(request, HttpResponse.BodyHandlers.ofString()).whenComplete((response, throwable) -> {
             API_SEMAPHORE.release();
         }).thenApply(response -> {
@@ -444,11 +451,11 @@ public class TranslationService {
     }
 
     private static CompletableFuture<String> translateYandexAsync(String text, String targetLang, String apiKey) {
+        JsonObject body = new JsonObject(); body.addProperty("targetLanguageCode", targetLang); JsonArray texts = new JsonArray(); texts.add(text); body.add("texts", texts);
+        HttpRequest request = HttpRequest.newBuilder().uri(URI.create("https://translate.api.cloud.yandex.net/translate/v2/translate")).header("Authorization", "Api-Key " + apiKey).header("Content-Type", "application/json").timeout(Duration.ofSeconds(5)).POST(HttpRequest.BodyPublishers.ofString(body.toString())).build();
         if (!API_SEMAPHORE.tryAcquire()) {
             return CompletableFuture.completedFuture("");
         }
-        JsonObject body = new JsonObject(); body.addProperty("targetLanguageCode", targetLang); JsonArray texts = new JsonArray(); texts.add(text); body.add("texts", texts);
-        HttpRequest request = HttpRequest.newBuilder().uri(URI.create("https://translate.api.cloud.yandex.net/translate/v2/translate")).header("Authorization", "Api-Key " + apiKey).header("Content-Type", "application/json").timeout(Duration.ofSeconds(5)).POST(HttpRequest.BodyPublishers.ofString(body.toString())).build();
         return HTTP_CLIENT.sendAsync(request, HttpResponse.BodyHandlers.ofString()).whenComplete((response, throwable) -> {
             API_SEMAPHORE.release();
         }).thenApply(response -> {

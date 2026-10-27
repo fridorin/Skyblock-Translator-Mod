@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Modrinth](https://img.shields.io/badge/Modrinth-Available-green.svg?logo=modrinth)](https://modrinth.com)
 
-**SkyBlock Translator** is a high-performance, client-side translation mod for Minecraft 1.21.x, designed specifically for **Hypixel SkyBlock**. The mod translates in-game chat, inventory item tooltips (lore), chest titles, holograms, player tab lists, and entities from English to your target language (default is Russian, with offline support for 30+ other target languages) in real-time.
+**SkyBlock Translator** is a high-performance, client-side translation mod for Minecraft 1.21.11 and 26.x, designed specifically for **Hypixel SkyBlock**. The mod translates in-game chat, inventory item tooltips (lore), chest titles, holograms, player tab lists, and entities from English to your target language (default is Russian, with bundled Russian and French dictionaries and online translation for 30+ languages) in real-time.
 
 Unlike generic translation mods, **SkyBlock Translator** is custom-built to parse the unique layout structures of Hypixel SkyBlock, optimizing performance, saving API limits, preserving interactive elements, and avoiding server bans.
 

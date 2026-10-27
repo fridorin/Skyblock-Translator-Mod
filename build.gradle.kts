@@ -42,6 +42,8 @@ repositories {
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.ow2.asm:asm-tree:9.10.1")
     // To change the versions see stonecutter.properties.toml
     minecraft("com.mojang:minecraft:${sc.current.version}")
     // Applies Mojang mappings on obfuscated versions; no-op on 26.1+ where Minecraft ships unobfuscated.

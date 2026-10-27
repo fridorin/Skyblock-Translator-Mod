@@ -11,35 +11,8 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-import java.util.concurrent.TimeUnit;
-import com.google.common.cache.Cache;
-import com.google.common.cache.CacheBuilder;
 @Mixin(Entity.class)
 public class EntityMixin {
-    private static class CacheEntry {
-        final String originalText;
-        final Component translatedComponent;
-        final long timestamp;
-        final boolean pending; // true = translateAsync() was fired, waiting for result
-
-        CacheEntry(String originalText, Component translatedComponent, boolean pending) {
-            this.originalText = originalText;
-            this.translatedComponent = translatedComponent;
-            this.timestamp = System.currentTimeMillis();
-            this.pending = pending;
-        }
-
-        boolean isExpired() {
-            return System.currentTimeMillis() - timestamp > (pending ? 5000 : 30000);
-        }
-    }
-
-    // Key: entity id, value: cached translation. Guava cache avoids unbounded memory growth.
-    private static final Cache<Integer, CacheEntry> TRANSLATED_NAMES_CACHE = CacheBuilder.newBuilder()
-        .maximumSize(500)
-        .expireAfterWrite(30, TimeUnit.SECONDS)
-        .build();
-
     @Inject(method = "getDisplayName", at = @At("RETURN"), cancellable = true)
     private void onGetDisplayName(CallbackInfoReturnable<Component> cir) {
         Entity entity = (Entity) (Object) this;
@@ -49,38 +22,10 @@ public class EntityMixin {
         String plainText = original.getString();
         if (plainText == null || plainText.trim().isEmpty()) return;
 
-        int entityId = entity.getId();
-
-        // Fast cache check first — this is the hot path, must be cheap
-        CacheEntry cached = TRANSLATED_NAMES_CACHE.getIfPresent(entityId);
-        if (cached != null && plainText.equals(cached.originalText) && !cached.isExpired()) {
-            if (!cached.pending) {
-                cir.setReturnValue(cached.translatedComponent);
-            }
-            // If pending, return original (don't re-fire translateAsync)
-            return;
-        }
-
-        if (TranslatorModClient.isTranslationDisabled()) {
-            TRANSLATED_NAMES_CACHE.put(entityId, new CacheEntry(plainText, original, false));
-            return;
-        }
-
-        if (entity instanceof net.minecraft.world.entity.player.Player) {
-            TRANSLATED_NAMES_CACHE.put(entityId, new CacheEntry(plainText, original, false));
-            return;
-        }
-
-        if (TranslationService.isBypassed()) {
-            return;
-        }
-
+        if (TranslatorModClient.isTranslationDisabled() || TranslationService.isBypassed()
+                || entity instanceof net.minecraft.world.entity.player.Player) return;
         TranslatorConfig config = TranslatorConfigManager.getConfig();
-
-        if (config.ignoreDamageIndicators && TranslationService.isDamageIndicator(plainText)) {
-            TRANSLATED_NAMES_CACHE.put(entityId, new CacheEntry(plainText, original, false));
-            return;
-        }
+        if (config.ignoreDamageIndicators && TranslationService.isDamageIndicator(plainText)) return;
 
         boolean isMob = false;
         boolean isNpc = false;
@@ -111,45 +56,9 @@ public class EntityMixin {
             }
         }
 
-        if (isMob && !config.translateMobNames) {
-            TRANSLATED_NAMES_CACHE.put(entityId, new CacheEntry(plainText, original, false));
-            return;
-        }
-        if (isNpc && !config.translateNpcNames) {
-            TRANSLATED_NAMES_CACHE.put(entityId, new CacheEntry(plainText, original, false));
-            return;
-        }
-        if (isHologram && !config.translateHolograms) {
-            TRANSLATED_NAMES_CACHE.put(entityId, new CacheEntry(plainText, original, false));
-            return;
-        }
-
-        String legacyText = TranslatorModClient.componentToLegacy(original);
-        String trimmed = legacyText.trim();
-        String immediate = TranslationService.getImmediateTranslation(trimmed);
-        
-        if (immediate != null) {
-            Component translated = TranslatorModClient.legacyToComponent(immediate);
-            if (!TranslationService.isTranslationSame(legacyText, immediate)) {
-                TRANSLATED_NAMES_CACHE.put(entityId, new CacheEntry(plainText, translated, false));
-                cir.setReturnValue(translated);
-            } else {
-                TRANSLATED_NAMES_CACHE.put(entityId, new CacheEntry(plainText, original, false));
-            }
-            return;
-        }
-
-        // Mark as pending so next frame won't re-fire translateAsync
-        TRANSLATED_NAMES_CACHE.put(entityId, new CacheEntry(plainText, original, true));
-
-        TranslationService.translateAsync(trimmed).thenAccept(translatedLegacy -> {
-            if (translatedLegacy != null && !translatedLegacy.trim().isEmpty() 
-                    && !TranslationService.isTranslationSame(trimmed, translatedLegacy)) {
-                Component translated = TranslatorModClient.legacyToComponent(translatedLegacy);
-                TRANSLATED_NAMES_CACHE.put(entityId, new CacheEntry(plainText, translated, false));
-            } else {
-                TRANSLATED_NAMES_CACHE.put(entityId, new CacheEntry(plainText, original, false));
-            }
-        });
+        if ((isMob && !config.translateMobNames) || (isNpc && !config.translateNpcNames)
+                || (isHologram && !config.translateHolograms)) return;
+        Component translated = TranslatorModClient.translateComponent(original);
+        if (translated != original) cir.setReturnValue(translated);
     }
 }
