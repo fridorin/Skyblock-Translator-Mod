@@ -21,6 +21,8 @@ jobs:
           java-version: '25'
       - uses: gradle/actions/setup-gradle@v4
       - run: chmod +x gradlew
+      - name: Check documentation, JSON and localization
+        run: python3 scripts/check_project.py
       - name: Build and test all Minecraft versions
         run: ./gradlew ':1.21.11:build' ':26.1.2:build' ':26.2:build' ':26.3:build'
       - name: Collect release jars
@@ -67,11 +69,28 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
-        run: gh release create "$RELEASE_TAG" release_jars/* --verify-tag --title "SkyBlock Translator $RELEASE_TAG" --notes-file "release-notes/$RELEASE_TAG.md"
+        run: |
+          if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" release_jars/* --clobber
+            gh release edit "$RELEASE_TAG" --notes-file "release-notes/$RELEASE_TAG.md"
+          else
+            gh release create "$RELEASE_TAG" release_jars/* --verify-tag --title "SkyBlock Translator $RELEASE_TAG" --notes-file "release-notes/$RELEASE_TAG.md"
+          fi
+
+  modrinth-description:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: github-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Synchronize Modrinth description and documentation links
+        env:
+          MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
+        run: python3 scripts/sync_modrinth.py
 
   modrinth:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: github-release
+    needs: modrinth-description
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -83,15 +102,7 @@ jobs:
         with:
           name: release-jars
           path: release_jars
-      - name: Check publishing credentials
-        id: credentials
-        env:
-          MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
-        shell: bash
-        run: |
-          if [ -n "$MODRINTH_TOKEN" ]; then echo 'available=true' >> "$GITHUB_OUTPUT"; fi
       - name: Publish matching Minecraft jar to Modrinth
-        if: steps.credentials.outputs.available == 'true'
         uses: kir-antipov/mc-publish@v3.3
         with:
           modrinth-id: skyblock-translator

@@ -133,7 +133,7 @@ public class TranslationService {
 
     public static boolean isDamageIndicator(String cleanText) {
         if (cleanText == null) return false;
-        String lower = cleanText.toLowerCase().trim();
+        String lower = cleanText.toLowerCase(java.util.Locale.ROOT).trim();
         if (lower.isEmpty()) return false;
         String stripped = DAMAGE_INDICATOR_CLEANUP.matcher(lower).replaceAll("");
         return stripped.isEmpty();
@@ -148,7 +148,7 @@ public class TranslationService {
             text.replaceAll("§x(?:§[0-9a-fA-F]){6}|§.", "")
         ).replaceAll("");
         
-        String lower = clean.toLowerCase().trim();
+        String lower = clean.toLowerCase(java.util.Locale.ROOT).trim();
         if (lower.isEmpty()) return true;
 
         TranslatorConfig config = TranslatorConfigManager.getConfig();
@@ -156,16 +156,25 @@ public class TranslationService {
         if (config.ignoreUrlsAndIps && (lower.contains("hypixel.net") || lower.contains("http://") || lower.contains("https://"))) return true;
         if (config.ignoreModPrefixes && (lower.contains("neu:") || lower.contains("skytils:") || lower.contains("sba:"))) return true;
         
+        if (config.ignoreAbilityCooldowns && (lower.startsWith("cooldown:") || lower.startsWith("ability cooldown:"))) return true;
+        if (config.ignoreDamageIndicators && isDamageIndicator(clean)) return true;
+        if (config.ignoreDungeonStats && lower.matches("^(?:secrets found|dungeon score|crypts|deaths):.*")) return true;
+        if (config.ignoreSlayerAlerts && (lower.startsWith("slayer quest") || lower.startsWith("boss slain"))) return true;
+        if (config.ignoreLobbyJoinLeft && lower.matches(".*\\b(?:joined|left) (?:the )?(?:lobby|game)[.!]?$")) return true;
+        if (config.ignoreClickActions && (lower.startsWith("click to ") || lower.startsWith("right-click to ") || lower.startsWith("left-click to "))) return true;
+        if (config.ignoreBazaarAndBin && (lower.startsWith("[bazaar]") || lower.startsWith("[auction]"))) return true;
+        if (config.ignoreDatesAndLobbies && lower.matches("(?:\\d{1,2}/\\d{1,2}/\\d{2,4}|(?:mini|mega)\\d+[a-z])")) return true;
+
         if (lower.startsWith("/")) return true;
 
         return false;
     }
 
-    private static final Pattern NUMBER_PATTERN = Pattern.compile("\\d{1,2}:\\d{2}(?::\\d{2})?|\\d{1,2}/\\d{1,2}/\\d{2,4}|[+-]?\\d+(?:[.,]\\d+)*(?:st|nd|rd|th|ST|ND|RD|TH|[kKM%])?");
+    private static final Pattern NUMBER_PATTERN = Pattern.compile("\\{[FPC]\\d+\\}|(\\d{1,2}:\\d{2}(?::\\d{2})?|\\d{1,2}/\\d{1,2}/\\d{2,4}|[+-]?\\d+(?:[.,]\\d+)*(?:st|nd|rd|th|ST|ND|RD|TH|[kKM%])?)");
     public static final Pattern ENCHANTMENT_LINE_PATTERN = Pattern.compile("^(?:[A-Za-z0-9\\s'-]+\\s+[IVXLCDM]+)(?:,\\s+[A-Za-z0-9\\s'-]+\\s+[IVXLCDM]+)*$");
     public static final Pattern NAMESPACE_PATTERN = Pattern.compile("^(?i)(minecraft|skyblock)\\s*:\\s*.+$");
     private static final Pattern FORMATTING_PATTERN = Pattern.compile("§x(?:§[0-9a-fA-F]){6}|§.", Pattern.CASE_INSENSITIVE);
-    private static final Pattern NON_ALPHANUMERIC_PATTERN = Pattern.compile("[^a-zA-Z0-9]");
+    private static final Pattern NON_ALPHANUMERIC_PATTERN = Pattern.compile("[^\\p{L}\\p{N}]");
 
     public static class FormattingTemplateResult {
         public final String templatedText;
@@ -212,8 +221,8 @@ public class TranslationService {
 
     public static boolean isTranslationSame(String original, String translated) {
         if (original == null || translated == null) return true;
-        String cleanOrig = NON_ALPHANUMERIC_PATTERN.matcher(FORMATTING_PATTERN.matcher(original).replaceAll("")).replaceAll("").toLowerCase();
-        String cleanTrans = NON_ALPHANUMERIC_PATTERN.matcher(FORMATTING_PATTERN.matcher(translated).replaceAll("")).replaceAll("").toLowerCase();
+        String cleanOrig = NON_ALPHANUMERIC_PATTERN.matcher(FORMATTING_PATTERN.matcher(original).replaceAll("")).replaceAll("").toLowerCase(java.util.Locale.ROOT);
+        String cleanTrans = NON_ALPHANUMERIC_PATTERN.matcher(FORMATTING_PATTERN.matcher(translated).replaceAll("")).replaceAll("").toLowerCase(java.util.Locale.ROOT);
         return cleanOrig.equals(cleanTrans);
     }
 
@@ -233,7 +242,11 @@ public class TranslationService {
         StringBuilder sb = new StringBuilder();
         int count = 0;
         while (matcher.find()) {
-            values.add(matcher.group());
+            if (matcher.group(1) == null) {
+                matcher.appendReplacement(sb, Matcher.quoteReplacement(matcher.group()));
+                continue;
+            }
+            values.add(matcher.group(1));
             matcher.appendReplacement(sb, "{" + count + "}");
             count++;
         }
@@ -369,7 +382,7 @@ public class TranslationService {
                                 String normalized = cleanPunctuationSpaces(normalizePlaceholders(res));
                                 if (generation == ru.fridorin.translator.TranslatorModClient.getCacheGeneration()
                                         && targetLanguage.equals(TranslatorConfigManager.getConfig().targetLanguage)) {
-                                    TranslationCache.put(trimmedTemplate, normalized);
+                                    TranslationCache.put(trimmedTemplate, normalized, targetLanguage, generation);
                                 }
                                 newFuture.complete(normalized);
                                 // Notify tooltip cache that new translations are available
@@ -406,11 +419,17 @@ public class TranslationService {
         }
     }
 
+    public static CompletableFuture<String> testConnectionAsync() {
+        TranslatorConfig config = TranslatorConfigManager.getConfig();
+        return requestApiTranslation("Hello", config, config.targetLanguage).orTimeout(8, TimeUnit.SECONDS)
+                .exceptionally(error -> "");
+    }
+
     public static CompletableFuture<String> translateOutgoingAsync(String text) {
         TranslatorConfig config = TranslatorConfigManager.getConfig();
         if (!config.enabled || text == null || text.trim().isEmpty()) return CompletableFuture.completedFuture("");
         // For Hypixel, outgoing chat should always be translated to English
-        return requestApiTranslation(text.trim(), config, "en").thenApply(TranslationService::cleanPunctuationSpaces);
+        return requestApiTranslation(text.trim(), config, "en").thenApply(TranslationService::cleanPunctuationSpaces).exceptionally(error -> text);
     }
 
     private static CompletableFuture<String> translateGoogleFreeAsync(String text, String targetLang) {
@@ -437,14 +456,21 @@ public class TranslationService {
         } catch (Exception e) { API_SEMAPHORE.release(); LOGGER.warn("Google Translate API threw exception", e); return CompletableFuture.completedFuture(""); }
     }
 
-    private static CompletableFuture<String> translateDeepLAsync(String text, String targetLang, String apiKey) {
-        HttpRequest request = HttpRequest.newBuilder().uri(URI.create("https://api-free.deepl.com/v2/translate")).header("Authorization", "DeepL-Auth-Key " + apiKey).header("Content-Type", "application/x-www-form-urlencoded").timeout(Duration.ofSeconds(5)).POST(HttpRequest.BodyPublishers.ofString("text=" + URLEncoder.encode(text, StandardCharsets.UTF_8) + "&target_lang=" + targetLang.toUpperCase())).build();
-        if (!API_SEMAPHORE.tryAcquire()) {
-            return CompletableFuture.completedFuture("");
-        }
-        return HTTP_CLIENT.sendAsync(request, HttpResponse.BodyHandlers.ofString()).whenComplete((response, throwable) -> {
+    private static CompletableFuture<HttpResponse<String>> sendLimitedRequest(HttpRequest request) {
+        if (!API_SEMAPHORE.tryAcquire()) return CompletableFuture.completedFuture(null);
+        try {
+            return HTTP_CLIENT.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                    .whenComplete((response, error) -> API_SEMAPHORE.release());
+        } catch (Exception error) {
             API_SEMAPHORE.release();
-        }).thenApply(response -> {
+            return CompletableFuture.failedFuture(error);
+        }
+    }
+
+    private static CompletableFuture<String> translateDeepLAsync(String text, String targetLang, String apiKey) {
+        HttpRequest request = HttpRequest.newBuilder().uri(URI.create("https://api-free.deepl.com/v2/translate")).header("Authorization", "DeepL-Auth-Key " + apiKey).header("Content-Type", "application/x-www-form-urlencoded").timeout(Duration.ofSeconds(5)).POST(HttpRequest.BodyPublishers.ofString("text=" + URLEncoder.encode(text, StandardCharsets.UTF_8) + "&target_lang=" + targetLang.toUpperCase(java.util.Locale.ROOT))).build();
+        return sendLimitedRequest(request).thenApply(response -> {
+            if (response == null) return "";
             if (response.statusCode() == 200) return JsonParser.parseString(response.body()).getAsJsonObject().getAsJsonArray("translations").get(0).getAsJsonObject().get("text").getAsString();
             return "[DeepL Error: " + response.statusCode() + "]";
         }).exceptionally(e -> { LOGGER.warn("DeepL API failed", e); return "[DeepL Exception: " + e.getMessage() + "]"; });
@@ -453,12 +479,8 @@ public class TranslationService {
     private static CompletableFuture<String> translateYandexAsync(String text, String targetLang, String apiKey) {
         JsonObject body = new JsonObject(); body.addProperty("targetLanguageCode", targetLang); JsonArray texts = new JsonArray(); texts.add(text); body.add("texts", texts);
         HttpRequest request = HttpRequest.newBuilder().uri(URI.create("https://translate.api.cloud.yandex.net/translate/v2/translate")).header("Authorization", "Api-Key " + apiKey).header("Content-Type", "application/json").timeout(Duration.ofSeconds(5)).POST(HttpRequest.BodyPublishers.ofString(body.toString())).build();
-        if (!API_SEMAPHORE.tryAcquire()) {
-            return CompletableFuture.completedFuture("");
-        }
-        return HTTP_CLIENT.sendAsync(request, HttpResponse.BodyHandlers.ofString()).whenComplete((response, throwable) -> {
-            API_SEMAPHORE.release();
-        }).thenApply(response -> {
+        return sendLimitedRequest(request).thenApply(response -> {
+            if (response == null) return "";
             if (response.statusCode() == 200) return JsonParser.parseString(response.body()).getAsJsonObject().getAsJsonArray("translations").get(0).getAsJsonObject().get("text").getAsString();
             return "[Yandex Error: " + response.statusCode() + "]";
         }).exceptionally(e -> { LOGGER.warn("Yandex API failed", e); return "[Yandex Exception: " + e.getMessage() + "]"; });

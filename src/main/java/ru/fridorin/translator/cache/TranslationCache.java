@@ -20,6 +20,7 @@ public class TranslationCache {
     private static final Logger LOGGER = LoggerFactory.getLogger(TranslationCache.class);
     private static final Gson GSON = new GsonBuilder().create();
     private static File cacheFile;
+    private static String activeLanguage = "ru";
     private static final int MAX_SIZE = 10000;
 
     private static final com.google.common.cache.Cache<String, String> lruCache = com.google.common.cache.CacheBuilder.newBuilder()
@@ -36,11 +37,15 @@ public class TranslationCache {
     private static volatile boolean isDirty = false;
 
     public static void loadForLanguage(String lang) {
+        lang = ru.fridorin.translator.config.TranslatorConfigManager.normalizeLanguage(lang);
         synchronized (SCHEDULER_LOCK) {
             if (isDirty) {
                 saveLocked();
             }
             lruCache.invalidateAll();
+            isDirty = false;
+            activeLanguage = lang;
+            ru.fridorin.translator.TranslatorModClient.clearComponentCache();
             
             String filename = "cache_" + lang + ".json";
             cacheFile = FabricLoader.getInstance().getConfigDir().resolve("skyblock_translator/" + filename).toFile();
@@ -64,10 +69,18 @@ public class TranslationCache {
     public static String get(String text) {
         if (text == null) return null;
         String lower = text.trim().toLowerCase(java.util.Locale.ROOT);
-        return lruCache.getIfPresent(lower);
+        synchronized (SCHEDULER_LOCK) {
+            if (!activeLanguage.equals(ru.fridorin.translator.config.TranslatorConfigManager.getConfig().targetLanguage)) return null;
+            return lruCache.getIfPresent(lower);
+        }
     }
 
     public static void put(String original, String translated) {
+        put(original, translated, ru.fridorin.translator.config.TranslatorConfigManager.getConfig().targetLanguage,
+                ru.fridorin.translator.TranslatorModClient.getCacheGeneration());
+    }
+
+    public static void put(String original, String translated, String language, long generation) {
         if (original == null || translated == null) return;
         String trimmedOrig = original.trim();
         String trimmedTrans = translated.trim();
@@ -79,6 +92,9 @@ public class TranslationCache {
         }
 
         synchronized (SCHEDULER_LOCK) {
+            if (!activeLanguage.equals(language)
+                    || !language.equals(ru.fridorin.translator.config.TranslatorConfigManager.getConfig().targetLanguage)
+                    || generation != ru.fridorin.translator.TranslatorModClient.getCacheGeneration()) return;
             lruCache.put(trimmedOrig.toLowerCase(java.util.Locale.ROOT), trimmedTrans);
             isDirty = true;
         }
@@ -132,11 +148,7 @@ public class TranslationCache {
             if (parent != null && !parent.exists()) {
                 parent.mkdirs();
             }
-            File tempFile = new File(cacheFile.getParentFile(), cacheFile.getName() + ".tmp");
-            try (java.io.BufferedWriter writer = java.nio.file.Files.newBufferedWriter(tempFile.toPath(), java.nio.charset.StandardCharsets.UTF_8)) {
-                GSON.toJson(snapshot, writer);
-            }
-            java.nio.file.Files.move(tempFile.toPath(), cacheFile.toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            ru.fridorin.translator.util.AtomicFiles.write(cacheFile.toPath(), GSON.toJson(snapshot));
         } catch (IOException e) {
             isDirty = true;
             LOGGER.error("Failed to save translation cache", e);
@@ -146,10 +158,16 @@ public class TranslationCache {
     public static void scheduleSave() {
         if (!isDirty || scheduler.isShutdown()) return;
         synchronized (SCHEDULER_LOCK) {
+            if (scheduler.isShutdown()) return;
             if (pendingSaveTask != null && !pendingSaveTask.isDone()) {
-                pendingSaveTask.cancel(false);
+                return;
             }
-            pendingSaveTask = scheduler.schedule(TranslationCache::save, 5, TimeUnit.SECONDS);
+            pendingSaveTask = scheduler.schedule(() -> {
+                synchronized (SCHEDULER_LOCK) {
+                    pendingSaveTask = null;
+                    saveLocked();
+                }
+            }, 5, TimeUnit.SECONDS);
         }
     }
 
@@ -164,9 +182,11 @@ public class TranslationCache {
     }
 
     public static void clear() {
-        lruCache.invalidateAll();
-        isDirty = true;
-        save();
+        synchronized (SCHEDULER_LOCK) {
+            ru.fridorin.translator.TranslatorModClient.clearComponentCache();
+            lruCache.invalidateAll();
+            isDirty = true;
+            saveLocked();
+        }
     }
 }
-

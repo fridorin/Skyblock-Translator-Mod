@@ -38,46 +38,13 @@ public class ItemStackMixin {
         // Create a new list to avoid mutating caches from other mods (like REI or Skyblocker)
         List<Component> newLines = new java.util.ArrayList<>(originalLines.size());
 
-        // Translate lines
-        int startIndex = config.translateItemNames ? 0 : 1;
-        
+        var filter = new ru.fridorin.translator.service.TooltipTranslationFilter();
         for (int i = 0; i < originalLines.size(); i++) {
             Component line = originalLines.get(i);
-            
-            if (i < startIndex) {
-                newLines.add(line);
-                continue;
-            }
-            
-            String plainText = line.getString();
-            
-            if (plainText.trim().isEmpty()) {
-                newLines.add(line);
-                continue;
-            }
-            
-            String cleanText = plainText.replaceAll("§x(?:§[0-9a-fA-F]){6}|§.", "").trim();
-            
-            // Apply lightweight toggle checks to respect config settings
-            if (!config.translateEnchantments && TranslationService.ENCHANTMENT_LINE_PATTERN.matcher(cleanText).matches()) {
-                newLines.add(line);
-                continue;
-            }
-            if (!config.translateAbilityNames && (cleanText.toLowerCase().startsWith("ability:") || cleanText.toLowerCase().startsWith("item ability:"))) {
-                newLines.add(line);
-                continue;
-            }
-            
-            // Skip technical mod identifiers or namespaces
-            if (TranslationService.NAMESPACE_PATTERN.matcher(cleanText).matches()) {
-                newLines.add(line);
-                continue;
-            }
-            
-            Component translated = TranslatorModClient.translateComponent(line);
-            newLines.add(translated);
+            newLines.add(filter.shouldTranslate(line.getString(), i, config)
+                    ? TranslatorModClient.translateComponent(line) : line);
         }
-        
+
         cir.setReturnValue(newLines);
     }
 }

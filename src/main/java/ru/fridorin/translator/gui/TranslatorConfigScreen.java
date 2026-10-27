@@ -21,35 +21,35 @@ public class TranslatorConfigScreen {
     private static final java.util.Map<String, String> LANGUAGE_MAP = new java.util.LinkedHashMap<>();
     static {
         LANGUAGE_MAP.put("ru", "Русский (Russian)");
-        LANGUAGE_MAP.put("es", "Испанский (Spanish)");
-        LANGUAGE_MAP.put("fr", "Французский (French)");
-        LANGUAGE_MAP.put("de", "Немецкий (German)");
-        LANGUAGE_MAP.put("zh", "Китайский (Chinese)");
-        LANGUAGE_MAP.put("ja", "Японский (Japanese)");
-        LANGUAGE_MAP.put("ko", "Корейский (Korean)");
-        LANGUAGE_MAP.put("pt", "Португальский (Portuguese)");
-        LANGUAGE_MAP.put("it", "Итальянский (Italian)");
-        LANGUAGE_MAP.put("tr", "Турецкий (Turkish)");
-        LANGUAGE_MAP.put("pl", "Польский (Polish)");
-        LANGUAGE_MAP.put("uk", "Украинский (Ukrainian)");
-        LANGUAGE_MAP.put("be", "Белорусский (Belarusian)");
-        LANGUAGE_MAP.put("kk", "Казахский (Kazakh)");
-        LANGUAGE_MAP.put("ar", "Арабский (Arabic)");
-        LANGUAGE_MAP.put("hi", "Хинди (Hindi)");
-        LANGUAGE_MAP.put("vi", "Вьетнамский (Vietnamese)");
-        LANGUAGE_MAP.put("th", "Тайский (Thai)");
-        LANGUAGE_MAP.put("nl", "Нидерландский (Dutch)");
-        LANGUAGE_MAP.put("sv", "Шведский (Swedish)");
-        LANGUAGE_MAP.put("no", "Норвежский (Norwegian)");
-        LANGUAGE_MAP.put("da", "Датский (Danish)");
-        LANGUAGE_MAP.put("fi", "Финский (Finnish)");
-        LANGUAGE_MAP.put("cs", "Чешский (Czech)");
-        LANGUAGE_MAP.put("el", "Греческий (Greek)");
-        LANGUAGE_MAP.put("bg", "Болгарский (Bulgarian)");
-        LANGUAGE_MAP.put("ro", "Румынский (Romanian)");
-        LANGUAGE_MAP.put("hu", "Венгерский (Hungarian)");
-        LANGUAGE_MAP.put("sk", "Словацкий (Slovak)");
-        LANGUAGE_MAP.put("id", "Индонезийский (Indonesian)");
+        LANGUAGE_MAP.put("es", "Español (Spanish)");
+        LANGUAGE_MAP.put("fr", "Français (French)");
+        LANGUAGE_MAP.put("de", "Deutsch (German)");
+        LANGUAGE_MAP.put("zh", "中文 (Chinese)");
+        LANGUAGE_MAP.put("ja", "日本語 (Japanese)");
+        LANGUAGE_MAP.put("ko", "한국어 (Korean)");
+        LANGUAGE_MAP.put("pt", "Português (Portuguese)");
+        LANGUAGE_MAP.put("it", "Italiano (Italian)");
+        LANGUAGE_MAP.put("tr", "Türkçe (Turkish)");
+        LANGUAGE_MAP.put("pl", "Polski (Polish)");
+        LANGUAGE_MAP.put("uk", "Українська (Ukrainian)");
+        LANGUAGE_MAP.put("be", "Беларуская (Belarusian)");
+        LANGUAGE_MAP.put("kk", "Қазақша (Kazakh)");
+        LANGUAGE_MAP.put("ar", "العربية (Arabic)");
+        LANGUAGE_MAP.put("hi", "हिन्दी (Hindi)");
+        LANGUAGE_MAP.put("vi", "Tiếng Việt (Vietnamese)");
+        LANGUAGE_MAP.put("th", "ไทย (Thai)");
+        LANGUAGE_MAP.put("nl", "Nederlands (Dutch)");
+        LANGUAGE_MAP.put("sv", "Svenska (Swedish)");
+        LANGUAGE_MAP.put("no", "Norsk (Norwegian)");
+        LANGUAGE_MAP.put("da", "Dansk (Danish)");
+        LANGUAGE_MAP.put("fi", "Suomi (Finnish)");
+        LANGUAGE_MAP.put("cs", "Čeština (Czech)");
+        LANGUAGE_MAP.put("el", "Ελληνικά (Greek)");
+        LANGUAGE_MAP.put("bg", "Български (Bulgarian)");
+        LANGUAGE_MAP.put("ro", "Română (Romanian)");
+        LANGUAGE_MAP.put("hu", "Magyar (Hungarian)");
+        LANGUAGE_MAP.put("sk", "Slovenčina (Slovak)");
+        LANGUAGE_MAP.put("id", "Bahasa Indonesia (Indonesian)");
     }
 
     private static Screen activeParentScreen = null;
@@ -127,6 +127,12 @@ public class TranslatorConfigScreen {
                         .name(translate("opt.enabled"))
                         .description(OptionDescription.of(translate("opt.enabled.desc")))
                         .binding(true, () -> config.enabled, val -> config.enabled = val)
+                        .controller(TickBoxControllerBuilder::create)
+                        .build())
+                    .option(Option.<Boolean>createBuilder()
+                        .name(translate("opt.only_hypixel"))
+                        .description(OptionDescription.of(translate("opt.only_hypixel.desc")))
+                        .binding(true, () -> config.onlyOnHypixel, val -> config.onlyOnHypixel = val)
                         .controller(TickBoxControllerBuilder::create)
                         .build())
                     .option(Option.<Boolean>createBuilder()
@@ -496,7 +502,12 @@ public class TranslatorConfigScreen {
                         .description(OptionDescription.of(translate("opt.reload.desc")))
                         .action((opt, btn) -> {
                             TranslatorConfigManager.load();
+                            String language = TranslatorConfigManager.getConfig().targetLanguage;
+                            TranslationCache.loadForLanguage(language);
+                            SkyblockDictionary.loadForLanguage(language);
                             SkyblockDictionary.loadUserDictionary();
+                            TranslatorModClient.clearComponentCache();
+                            net.minecraft.client.Minecraft.getInstance().setScreen(createScreen(parent));
                         })
                         .build())
                     .option(ButtonOption.createBuilder()

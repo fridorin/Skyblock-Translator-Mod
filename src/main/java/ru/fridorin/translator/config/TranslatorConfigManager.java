@@ -9,7 +9,24 @@ import java.io.IOException;
 public class TranslatorConfigManager {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static File configFile;
-    private static TranslatorConfig config = new TranslatorConfig();
+    private static volatile TranslatorConfig config = new TranslatorConfig();
+
+    public static String normalizeLanguage(String value) {
+        if (value == null) return "ru";
+        String normalized = value.trim().toLowerCase(java.util.Locale.ROOT);
+        return normalized.matches("[a-z]{2,3}(?:-[a-z0-9]{2,8})*") ? normalized : "ru";
+    }
+
+    public static void validate(TranslatorConfig value) {
+        value.targetLanguage = normalizeLanguage(value.targetLanguage);
+        if (value.apiProvider == null || !java.util.Set.of("GOOGLE_FREE", "DEEPL_FREE", "YANDEX")
+                .contains(value.apiProvider.toUpperCase(java.util.Locale.ROOT))) value.apiProvider = "GOOGLE_FREE";
+        value.apiProvider = value.apiProvider.toUpperCase(java.util.Locale.ROOT);
+        if (value.apiKey == null) value.apiKey = "";
+        if (value.chatDisplayMode == null || !java.util.Set.of("SEPARATE_LINE", "APPEND", "INLINE", "REPLACE")
+                .contains(value.chatDisplayMode.toUpperCase(java.util.Locale.ROOT))) value.chatDisplayMode = "SEPARATE_LINE";
+        value.chatDisplayMode = value.chatDisplayMode.toUpperCase(java.util.Locale.ROOT);
+    }
 
     public static void init() {
         configFile = FabricLoader.getInstance().getConfigDir().resolve("skyblock_translator/config.json").toFile();
@@ -31,18 +48,11 @@ public class TranslatorConfigManager {
         try (java.io.BufferedReader reader = java.nio.file.Files.newBufferedReader(configFile.toPath(), java.nio.charset.StandardCharsets.UTF_8)) {
             TranslatorConfig loaded = GSON.fromJson(reader, TranslatorConfig.class);
             if (loaded != null) {
+                validate(loaded);
                 config = loaded;
                 
-                // Force migration of old configs where defaults were false
+                // Keep user-selected switches when migrating older configurations.
                 if (config.configVersion < 2) {
-                    config.translateEnchantments = true;
-                    config.translateEnchantmentDescriptions = true;
-                    config.translateAbilityNames = true;
-                    config.translateAbilityDescriptions = true;
-                    config.translateRarity = true;
-                    config.translateItemNames = true;
-                    config.translateOutgoingChat = true;
-                    config.translateTooltips = true;
                     config.configVersion = 2;
                     save();
                 }
@@ -53,6 +63,8 @@ public class TranslatorConfigManager {
     }
 
     public static void save() {
+        validate(config);
+        ru.fridorin.translator.TranslatorModClient.clearComponentCache();
         if (configFile == null) {
             return;
         }
@@ -61,10 +73,7 @@ public class TranslatorConfigManager {
             if (parent != null && !parent.exists()) {
                 parent.mkdirs();
             }
-            try (java.io.BufferedWriter writer = java.nio.file.Files.newBufferedWriter(configFile.toPath(), java.nio.charset.StandardCharsets.UTF_8)) {
-                GSON.toJson(config, writer);
-            }
-            ru.fridorin.translator.TranslatorModClient.clearComponentCache();
+            ru.fridorin.translator.util.AtomicFiles.write(configFile.toPath(), GSON.toJson(config));
         } catch (IOException e) {
             System.err.println("[Skyblock Translator] Failed to save config: " + e.getMessage());
         }

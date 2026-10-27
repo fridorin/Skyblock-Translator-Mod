@@ -207,15 +207,17 @@ public class SkyblockDictionary {
      * Rebuild the phrase translation cache. Must be called whenever the dictionary changes.
      */
     static void rebuildPhraseCache() {
-        java.util.List<String> sortedKeys = new java.util.ArrayList<>(DICTIONARY.keySet());
+        Map<String, String> phrases = new java.util.HashMap<>(DICTIONARY);
+        phrases.putAll(USER_DICTIONARY);
+        java.util.List<String> sortedKeys = new java.util.ArrayList<>(phrases.keySet());
         sortedKeys.sort((a, b) -> Integer.compare(b.length(), a.length()));
 
         java.util.List<PhraseEntry> entries = new java.util.ArrayList<>();
         for (String key : sortedKeys) {
-            if (key.trim().isEmpty() || key.startsWith("gui.") || key.startsWith("item_type.") || key.startsWith("item_gender.") || key.contains(".") || key.length() < 3) {
+            if (key.trim().isEmpty() || key.startsWith("r:") || key.startsWith("gui.") || key.startsWith("item_type.") || key.startsWith("item_gender.") || key.contains(".") || key.length() < 3) {
                 continue;
             }
-            String translation = DICTIONARY.get(key);
+            String translation = phrases.get(key);
             if (translation == null || translation.trim().isEmpty() || translation.equalsIgnoreCase(key)) {
                 continue;
             }
@@ -264,6 +266,7 @@ public class SkyblockDictionary {
     private static class RegexEntry {
         final java.util.regex.Pattern pattern;
         final String replacement;
+        boolean invalidReplacement;
 
         RegexEntry(java.util.regex.Pattern pattern, String replacement) {
             this.pattern = pattern;
@@ -278,13 +281,17 @@ public class SkyblockDictionary {
      */
     static void rebuildRegexCache() {
         ru.fridorin.translator.TranslatorModClient.clearComponentCache();
+        rebuildPhraseCache();
         cachedUserRegex = buildRegexEntries(USER_DICTIONARY);
         cachedDictRegex = buildRegexEntries(DICTIONARY);
     }
 
     private static java.util.List<RegexEntry> buildRegexEntries(Map<String, String> dict) {
         java.util.List<RegexEntry> entries = new java.util.ArrayList<>();
-        for (Map.Entry<String, String> entry : dict.entrySet()) {
+        java.util.List<Map.Entry<String, String>> sorted = new java.util.ArrayList<>(dict.entrySet());
+        sorted.sort(java.util.Comparator.<Map.Entry<String, String>>comparingInt(e -> e.getKey().length()).reversed()
+                .thenComparing(Map.Entry::getKey));
+        for (Map.Entry<String, String> entry : sorted) {
             String key = entry.getKey();
             if (key.startsWith("r:") && key.length() > 2) {
                 try {
@@ -302,21 +309,25 @@ public class SkyblockDictionary {
     public static String lookupRegex(String text) {
         if (text == null || text.isEmpty()) return null;
         for (RegexEntry entry : cachedUserRegex) {
+            if (entry.invalidReplacement) continue;
             java.util.regex.Matcher matcher = entry.pattern.matcher(text);
             if (matcher.find()) {
-                return matcher.replaceAll(entry.replacement);
+                try { return matcher.replaceAll(entry.replacement); }
+                catch (IllegalArgumentException | IndexOutOfBoundsException invalid) { entry.invalidReplacement = true; }
             }
         }
         for (RegexEntry entry : cachedDictRegex) {
+            if (entry.invalidReplacement) continue;
             java.util.regex.Matcher matcher = entry.pattern.matcher(text);
             if (matcher.find()) {
-                return matcher.replaceAll(entry.replacement);
+                try { return matcher.replaceAll(entry.replacement); }
+                catch (IllegalArgumentException | IndexOutOfBoundsException invalid) { entry.invalidReplacement = true; }
             }
         }
         return null;
     }
 
-    public static String lookup(String text) {
+    public static synchronized String lookup(String text) {
         if (text == null) return null;
         String trimmed = text.trim();
         if (trimmed.isEmpty()) return null;
@@ -516,7 +527,8 @@ public class SkyblockDictionary {
             .replace("Donated", donatedTrans);
     }
 
-    public static void loadForLanguage(String lang) {
+    public static synchronized void loadForLanguage(String lang) {
+        lang = ru.fridorin.translator.config.TranslatorConfigManager.normalizeLanguage(lang);
         activeLanguage = lang;
         DICTIONARY.clear();
         ITEM_TYPES.clear();
@@ -533,7 +545,13 @@ public class SkyblockDictionary {
             saveDictionaryFile(dictFile);
         }
 
-        // 3. Process loaded data
+        rebuildDerivedData();
+        downloadDictionaryAsync(lang);
+    }
+
+    private static void rebuildDerivedData() {
+        ITEM_TYPES.clear();
+        ITEM_TYPES_GENDER.clear();
         for (Map.Entry<String, String> entry : DICTIONARY.entrySet()) {
             String key = entry.getKey();
             String value = entry.getValue();
@@ -548,11 +566,12 @@ public class SkyblockDictionary {
         }
 
         updateDynamicLists();
-        rebuildPhraseCache();
         rebuildRegexCache();
+    }
 
-        // 4. Download updates asynchronously (Fully non-blocking)
-        java.util.concurrent.CompletableFuture.runAsync(() -> downloadDictionaryAsync(lang));
+    static String normalizeDictionaryKey(String key) {
+        String trimmed = key.trim();
+        return trimmed.startsWith("r:") ? trimmed : trimmed.toLowerCase(java.util.Locale.ROOT);
     }
 
     private static void loadDictionaryFromResources(String lang) {
@@ -565,7 +584,7 @@ public class SkyblockDictionary {
                 if (loaded != null) {
                     for (Map.Entry<String, String> entry : loaded.entrySet()) {
                         if (entry.getKey() != null && entry.getValue() != null) {
-                            DICTIONARY.put(entry.getKey().toLowerCase(java.util.Locale.ROOT).trim(), entry.getValue().trim());
+                            DICTIONARY.put(normalizeDictionaryKey(entry.getKey()), entry.getValue().trim());
                         }
                     }
                 }
@@ -583,7 +602,7 @@ public class SkyblockDictionary {
                     String key = entry.getKey();
                     String value = entry.getValue();
                     if (key != null && value != null) {
-                        DICTIONARY.put(key.toLowerCase(java.util.Locale.ROOT).trim(), value.trim());
+                        DICTIONARY.put(normalizeDictionaryKey(key), value.trim());
                     }
                 }
             }
@@ -601,14 +620,15 @@ public class SkyblockDictionary {
             for (Map.Entry<String, String> entry : DICTIONARY.entrySet()) {
                 toSave.put(entry.getKey(), entry.getValue());
             }
-            try (java.io.BufferedWriter writer = java.nio.file.Files.newBufferedWriter(file.toPath(), java.nio.charset.StandardCharsets.UTF_8)) {
-                GSON.toJson(toSave, writer);
-            }
+            ru.fridorin.translator.util.AtomicFiles.write(file.toPath(), GSON.toJson(toSave));
         } catch (Exception e) {
         }
     }
 
     public static java.util.concurrent.CompletableFuture<Integer> downloadDictionaryAsync(String lang) {
+        if (lang == null || !lang.equals(ru.fridorin.translator.config.TranslatorConfigManager.normalizeLanguage(lang))) {
+            return java.util.concurrent.CompletableFuture.completedFuture(-1);
+        }
         String username = ru.fridorin.translator.config.TranslatorConfig.GITHUB_USERNAME;
         String repository = ru.fridorin.translator.config.TranslatorConfig.GITHUB_REPOSITORY;
         String branch = ru.fridorin.translator.config.TranslatorConfig.GITHUB_BRANCH;
@@ -641,47 +661,48 @@ public class SkyblockDictionary {
                     if (response.statusCode() == 200) {
                         Type type = new TypeToken<Map<String, String>>(){}.getType();
                         Map<String, String> downloaded = GSON.fromJson(response.body(), type);
-                        if (downloaded != null && !downloaded.isEmpty() && lang.equals(activeLanguage)) {
-                            for (Map.Entry<String, String> entry : downloaded.entrySet()) {
-                                String key = entry.getKey();
-                                String value = entry.getValue();
-                                if (key != null && value != null) {
-                                    DICTIONARY.put(key.toLowerCase(java.util.Locale.ROOT).trim(), value.trim());
-                                }
-                            }
-                            File dictFile = FabricLoader.getInstance().getConfigDir().resolve("skyblock_translator/dictionary_" + lang + ".json").toFile();
-                            saveDictionaryFile(dictFile);
-                            updateDynamicLists();
-                            rebuildPhraseCache();
-                            rebuildRegexCache();
-
-                            net.minecraft.client.Minecraft clientInstance = net.minecraft.client.Minecraft.getInstance();
-                            if (clientInstance != null) {
-                                clientInstance.execute(() -> {
-                                    if (clientInstance.player != null) {
-                                        //? if <26.1 {
-                                        clientInstance.player.displayClientMessage(
-                                            net.minecraft.network.chat.Component.literal("§a[SkyBlock Translator] Dictionary updated from GitHub! Loaded " + downloaded.size() + " entries."),
-                                            false
-                                        );
-                                        //?} else {
-                                        /*clientInstance.player.sendSystemMessage(
-                                            net.minecraft.network.chat.Component.literal("§a[SkyBlock Translator] Dictionary updated from GitHub! Loaded " + downloaded.size() + " entries.")
-                                        );
-                                        *///?}
+                        if (downloaded != null && !downloaded.isEmpty()) {
+                            synchronized (SkyblockDictionary.class) {
+                                if (!lang.equals(activeLanguage)) return -1;
+                                for (Map.Entry<String, String> entry : downloaded.entrySet()) {
+                                    String key = entry.getKey();
+                                    String value = entry.getValue();
+                                    if (key != null && value != null) {
+                                        DICTIONARY.put(normalizeDictionaryKey(key), value.trim());
                                     }
-                                });
+                                }
+                                File dictFile = FabricLoader.getInstance().getConfigDir().resolve("skyblock_translator/dictionary_" + lang + ".json").toFile();
+                                saveDictionaryFile(dictFile);
+                                rebuildDerivedData();
+
+                                net.minecraft.client.Minecraft clientInstance = net.minecraft.client.Minecraft.getInstance();
+                                if (clientInstance != null) {
+                                    clientInstance.execute(() -> {
+                                        if (clientInstance.player != null) {
+                                            //? if <26.1 {
+                                            clientInstance.player.displayClientMessage(
+                                                net.minecraft.network.chat.Component.literal("§a[SkyBlock Translator] Dictionary updated from GitHub! Loaded " + downloaded.size() + " entries."),
+                                                false
+                                            );
+                                            //?} else {
+                                            /*clientInstance.player.sendSystemMessage(
+                                                net.minecraft.network.chat.Component.literal("§a[SkyBlock Translator] Dictionary updated from GitHub! Loaded " + downloaded.size() + " entries.")
+                                            );
+                                            *///?}
+                                        }
+                                    });
+                                }
+                                return downloaded.size();
                             }
-                            return downloaded.size();
                         }
                     }
                 } catch (Exception e) {
                 }
                 return -1;
-            });
+            }).exceptionally(error -> -1);
     }
 
-    public static void loadUserDictionary() {
+    public static synchronized void loadUserDictionary() {
         try {
             java.io.File configFile = net.fabricmc.loader.api.FabricLoader.getInstance().getConfigDir().resolve("skyblock_translator/user_dictionary.json").toFile();
             if (!configFile.exists()) {
@@ -689,13 +710,8 @@ public class SkyblockDictionary {
                 if (parent != null && !parent.exists()) {
                     parent.mkdirs();
                 }
-                try (java.io.BufferedWriter writer = java.nio.file.Files.newBufferedWriter(configFile.toPath(), java.nio.charset.StandardCharsets.UTF_8)) {
-                    writer.write("{\n" +
-                            "  \"info\": \"Add your own translations here in the format: \\\"english text\\\": \\\"translated text\\\"\",\n" +
-                            "  \"hello\": \"hello\",\n" +
-                            "  \"lf coop\": \"looking for coop\"\n" +
-                            "}");
-                }
+                ru.fridorin.translator.util.AtomicFiles.write(configFile.toPath(),
+                        GSON.toJson(java.util.Map.of("info", "Add translations as English text: translated text")));
             }
             if (configFile.exists()) {
                 try (java.io.BufferedReader reader = java.nio.file.Files.newBufferedReader(configFile.toPath(), java.nio.charset.StandardCharsets.UTF_8)) {
@@ -706,7 +722,7 @@ public class SkyblockDictionary {
                         USER_DICTIONARY.clear();
                         for (Map.Entry<String, String> entry : loaded.entrySet()) {
                             if (entry.getKey() != null && entry.getValue() != null && !entry.getKey().equals("info")) {
-                                USER_DICTIONARY.put(entry.getKey().toLowerCase(java.util.Locale.ROOT).trim(), entry.getValue().trim());
+                                USER_DICTIONARY.put(normalizeDictionaryKey(entry.getKey()), entry.getValue().trim());
                             }
                         }
                     }
@@ -718,9 +734,9 @@ public class SkyblockDictionary {
         }
     }
 
-    public static void addUserTranslation(String english, String translation) {
+    public static synchronized void addUserTranslation(String english, String translation) {
         if (english == null || translation == null) return;
-        String trimmedEng = english.trim().toLowerCase(java.util.Locale.ROOT);
+        String trimmedEng = normalizeDictionaryKey(english);
         String trimmedTrans = translation.trim();
         if (trimmedEng.isEmpty() || trimmedTrans.isEmpty()) return;
 
@@ -728,6 +744,7 @@ public class SkyblockDictionary {
 
         try {
             java.io.File configFile = net.fabricmc.loader.api.FabricLoader.getInstance().getConfigDir().resolve("skyblock_translator/user_dictionary.json").toFile();
+            java.nio.file.Files.createDirectories(configFile.toPath().getParent());
             Map<String, String> currentDict = new java.util.LinkedHashMap<>();
             currentDict.put("info", "Add your own translations here in the format: \"english text\": \"translated text\"");
             
@@ -739,7 +756,7 @@ public class SkyblockDictionary {
                     if (loaded != null) {
                         for (Map.Entry<String, String> entry : loaded.entrySet()) {
                             if (entry.getKey() != null && entry.getValue() != null && !entry.getKey().equalsIgnoreCase("info")) {
-                                currentDict.put(entry.getKey().toLowerCase(java.util.Locale.ROOT).trim(), entry.getValue().trim());
+                                currentDict.put(normalizeDictionaryKey(entry.getKey()), entry.getValue().trim());
                             }
                         }
                     }
@@ -749,9 +766,7 @@ public class SkyblockDictionary {
             
             currentDict.put(trimmedEng, trimmedTrans);
 
-            try (java.io.BufferedWriter writer = java.nio.file.Files.newBufferedWriter(configFile.toPath(), java.nio.charset.StandardCharsets.UTF_8)) {
-                GSON.toJson(currentDict, writer);
-            }
+            ru.fridorin.translator.util.AtomicFiles.write(configFile.toPath(), GSON.toJson(currentDict));
             updateDynamicLists();
             rebuildRegexCache();
         } catch (Exception e) {

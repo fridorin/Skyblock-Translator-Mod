@@ -2,12 +2,9 @@
   "category.skyblock_translator": "Переводчик Skyblock",
   "key.skyblock_translator.settings": "Открыть настройки",
   "key.skyblock_translator.toggle": "Включить/выключить переводчик",
-
   "gui.skyblock_translator.title": "§b§lНастройки SkyBlock Translator",
-  
   "gui.skyblock_translator.cat.main": "⚙ Главное",
   "gui.skyblock_translator.cat.main.tooltip": "Основные настройки работы мода, API ключи и GitHub",
-  
   "gui.skyblock_translator.group.global": "⚙ Глобальные параметры",
   "gui.skyblock_translator.opt.enabled": "✔ Включить переводчик",
   "gui.skyblock_translator.opt.enabled.desc": "[Рекомендуется / Стабильно] Глобально включает или выключает все функции перевода.",
@@ -15,13 +12,11 @@
   "gui.skyblock_translator.opt.disable_on_shift.desc": "[Рекомендуется / Стабильно] Временное отключение перевода всех элементов игры, пока зажата клавиша Shift, для быстрого просмотра оригинала.",
   "gui.skyblock_translator.opt.regex_translation": "⚡ Regex-перевод (Оффлайн)",
   "gui.skyblock_translator.opt.regex_translation.desc": "[Рекомендуется / Высокая производительность] Использовать регулярные выражения из локального словаря для мгновенного перевода без отправки в API.",
-  
   "gui.skyblock_translator.group.keybinds": "⌨ Настройка горячих клавиш",
   "gui.skyblock_translator.opt.key_settings": "⚙ Настройки мода",
   "gui.skyblock_translator.opt.key_settings.desc": "[Работает стабильно] Горячая клавиша для открытия меню настроек мода.",
   "gui.skyblock_translator.opt.key_toggle": "🔄 Вкл/Выкл переводчик",
   "gui.skyblock_translator.opt.key_toggle.desc": "[Работает стабильно] Горячая клавиша для быстрого включения/выключения переводчика прямо в игре.",
-  
   "gui.skyblock_translator.group.api": "🔑 Параметры API",
   "gui.skyblock_translator.opt.provider": "🔑 Сервис перевода",
   "gui.skyblock_translator.opt.provider.desc": "[Работает стабильно] Выберите переводчик. Google Free работает бесплатно. DeepL и Yandex требуют собственный API ключ, но переводят качественнее.",
@@ -32,10 +27,8 @@
   "gui.skyblock_translator.opt.showkey.desc": "[Работает стабильно] Отображать вводимые символы API ключа в поле ввода.",
   "gui.skyblock_translator.opt.key": "📝 API Ключ",
   "gui.skyblock_translator.opt.key.desc": "[Работает стабильно] Введите ваш API ключ для выбранного платного сервиса.",
-
   "gui.skyblock_translator.cat.chat": "💬 Чат",
   "gui.skyblock_translator.cat.chat.tooltip": "Настройки перевода чата и сообщений",
-  
   "gui.skyblock_translator.group.chat": "💬 Настройки чата",
   "gui.skyblock_translator.opt.translate_chat": "💬 Переводить чат",
   "gui.skyblock_translator.opt.translate_chat.desc": "[Рекомендуется / Стабильно] Включает или выключает перевод сообщений в игровом чате.",
@@ -51,7 +44,6 @@
   "gui.skyblock_translator.opt.hover_original.desc": "[Рекомендуется / Стабильно] Показывает всплывающую подсказку с оригинальным английским текстом при наведении курсора на перевод в чате.",
   "gui.skyblock_translator.opt.outgoing": "📤 Автоперевод отправки",
   "gui.skyblock_translator.opt.outgoing.desc": "[Экспериментально / Использовать аккуратно] Автоматически переводит ваши сообщения с русского на английский при отправке в чат.",
-
   "gui.skyblock_translator.group.channels": "🔍 Фильтрация каналов",
   "gui.skyblock_translator.opt.guild_chat": "🛡 Переводить чат гильдии",
   "gui.skyblock_translator.opt.guild_chat.desc": "[Работает стабильно] Переводить ли сообщения из чата гильдии и офицерского чата.",
@@ -65,10 +57,8 @@
   "gui.skyblock_translator.opt.public_chat.desc": "[Работает стабильно] Переводить ли обычные сообщения от игроков в лобби/мире.",
   "gui.skyblock_translator.opt.system_chat": "🤖 Переводить системные сообщения",
   "gui.skyblock_translator.opt.system_chat.desc": "[Рекомендуется / Стабильно] Переводить ли системные оповещения и объявления от сервера.",
-
   "gui.skyblock_translator.cat.world": "🌍 Игровой мир",
   "gui.skyblock_translator.cat.world.tooltip": "Настройки перевода сущностей и надписей в мире",
-  
   "gui.skyblock_translator.group.entities": "🌍 Сущности и Тексты",
   "gui.skyblock_translator.opt.holograms": "🔮 Переводить голограммы",
   "gui.skyblock_translator.opt.holograms.desc": "[Работает стабильно / Рекомендуется] Включает перевод парящих 3D текстов, указателей и голограмм.",
@@ -78,10 +68,8 @@
   "gui.skyblock_translator.opt.npc_names.desc": "[Не рекомендуется / Спам API] Включает перевод имен неигровых персонажей над их головами.",
   "gui.skyblock_translator.opt.translate_tablist": "📋 Переводить Таб-лист",
   "gui.skyblock_translator.opt.translate_tablist.desc": "[Рекомендуется / Стабильно] Включает перевод строк статистики, информации и лобби в меню игроков (Tab). Рекомендуется включить Regex-перевод.",
-
   "gui.skyblock_translator.cat.gui": "🖥 Интерфейс",
   "gui.skyblock_translator.cat.gui.tooltip": "Настройки перевода элементов GUI и предметов",
-  
   "gui.skyblock_translator.group.gui": "🖥 Элементы GUI",
   "gui.skyblock_translator.opt.tooltips": "📜 Описание предметов",
   "gui.skyblock_translator.opt.tooltips.desc": "[Рекомендуется / Стабильно] Включает перевод описаний (lore) предметов в инвентарях.",
@@ -101,10 +89,8 @@
   "gui.skyblock_translator.opt.titles.desc": "[Рекомендуется / Стабильно] Включает перевод названий контейнеров, сундуков и меню в игре.",
   "gui.skyblock_translator.opt.scoreboard": "📊 Боковая панель (Scoreboard)",
   "gui.skyblock_translator.opt.scoreboard.desc": "[Рекомендуется / Стабильно] Включает перевод строк игровой статистики на боковой панели экрана. Совместимо с оффлайн-словарем.",
-
   "gui.skyblock_translator.cat.filters": "🛡 Фильтры",
   "gui.skyblock_translator.cat.filters.tooltip": "Настройки пропуска и игнорирования технического текста",
-  
   "gui.skyblock_translator.group.technical_filters": "🛡 Технические фильтры",
   "gui.skyblock_translator.opt.ignore_cooldowns": "⏳ Пропуск кулдаунов",
   "gui.skyblock_translator.opt.ignore_cooldowns.desc": "[Рекомендуется / Стабильно] Игнорировать сообщения о кулдаунах способностей в чате.",
@@ -128,10 +114,8 @@
   "gui.skyblock_translator.opt.ignore_urls.desc": "[Рекомендуется / Стабильно] Игнорировать ссылки, веб-адреса и IP-адрес сервера.",
   "gui.skyblock_translator.opt.ignore_dates": "📅 Пропуск дат и лобби",
   "gui.skyblock_translator.opt.ignore_dates.desc": "[Рекомендуется / Стабильно] Игнорировать даты, метки времени и технические названия серверов (например, mini71P).",
-
   "gui.skyblock_translator.cat.cache": "💾 Кэш и Инфо",
   "gui.skyblock_translator.cat.cache.tooltip": "Очистка кэша, сброс настроек и поддержка",
-  
   "gui.skyblock_translator.group.actions": "💾 Действия",
   "gui.skyblock_translator.opt.clear_cache": "🧹 Очистить кэш перевода",
   "gui.skyblock_translator.opt.clear_cache.desc": "[Работает стабильно] Полностью удаляет сохраненный локальный кэш переводов с диска.",
@@ -141,10 +125,12 @@
   "gui.skyblock_translator.opt.report.desc": "[Работает стабильно] Открыть GitHub репозиторий для сообщения об ошибках в коде мода.",
   "gui.skyblock_translator.opt.suggest_translation": "💡 Предложить перевод / слова",
   "gui.skyblock_translator.opt.suggest_translation.desc": "[Работает стабильно] Открыть GitHub репозиторий словаря, чтобы предложить перевод для недостающих фраз.",
-
   "gui.skyblock_translator.cat.language": "🌐 Выбор языка",
   "gui.skyblock_translator.cat.language.tooltip": "Выбор языка для перевода сообщений в игре",
   "gui.skyblock_translator.group.language_select": "🌐 Выберите язык / Select Language",
   "gui.skyblock_translator.lang_selected": "Этот язык уже выбран",
-  "gui.skyblock_translator.lang_select_btn": "Нажмите для переключения на %s"
+  "gui.skyblock_translator.lang_select_btn": "Нажмите для переключения на %s",
+  "key.category.skyblock_translator.keys": "Переводчик Skyblock",
+  "gui.skyblock_translator.opt.only_hypixel": "Только на Hypixel",
+  "gui.skyblock_translator.opt.only_hypixel.desc": "Переводить только при подключении к hypixel.net или hypixel.io. Отключите для проверки в одиночной игре или на другом сервере."
 }

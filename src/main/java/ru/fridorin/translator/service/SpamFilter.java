@@ -11,7 +11,7 @@ public class SpamFilter {
 
     public static boolean shouldIgnore(String text) {
         if (text == null) return true;
-        String trimmed = text.trim();
+        String trimmed = text.replaceAll("§x(?:§[0-9a-fA-F]){6}|§.", "").trim();
         if (trimmed.isEmpty()) return true;
 
         // Fast indexOf checks instead of regex backtracking for common patterns
@@ -22,21 +22,7 @@ public class SpamFilter {
             if (hp < def && def < mana) return true;
         }
 
-        if (trimmed.contains("[")) {
-            // Check for progress bar-like spam (e.g. [||||||||||||||          ])
-            boolean isProgressBar = true;
-            boolean hasChars = false;
-            for (int i = trimmed.indexOf('[') + 1; i < trimmed.length(); i++) {
-                char c = trimmed.charAt(i);
-                if (c == ']') break;
-                if (c != '|' && c != '=' && c != '+' && c != '-' && c != ' ') {
-                    isProgressBar = false;
-                    break;
-                }
-                hasChars = true;
-            }
-            if (isProgressBar && hasChars) return true;
-        }
+        if (trimmed.matches("\\[[|=+\\- ]+\\]")) return true;
 
         if (trimmed.startsWith("+") && PATTERN_CURRENCY.matcher(trimmed).matches()) return true;
         if (PATTERN_DAMAGE.matcher(trimmed).matches()) return true;

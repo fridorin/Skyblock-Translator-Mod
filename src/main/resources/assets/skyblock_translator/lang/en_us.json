@@ -2,12 +2,9 @@
   "category.skyblock_translator": "Skyblock Translator",
   "key.skyblock_translator.settings": "Open Settings Screen",
   "key.skyblock_translator.toggle": "Toggle Translator ON/OFF",
-
   "gui.skyblock_translator.title": "§b§lSkyBlock Translator Settings",
-  
   "gui.skyblock_translator.cat.main": "⚙ Main",
   "gui.skyblock_translator.cat.main.tooltip": "Core mod settings, API keys and GitHub settings",
-  
   "gui.skyblock_translator.group.global": "⚙ Global Parameters",
   "gui.skyblock_translator.opt.enabled": "✔ Enable Translator",
   "gui.skyblock_translator.opt.enabled.desc": "[Recommended / Stable] Globally enables or disables all translation features.",
@@ -15,13 +12,11 @@
   "gui.skyblock_translator.opt.disable_on_shift.desc": "[Recommended / Stable] Temporarily disables all translation features while holding Shift to quickly inspect the original text.",
   "gui.skyblock_translator.opt.regex_translation": "⚡ Regex Translation (Offline)",
   "gui.skyblock_translator.opt.regex_translation.desc": "[Recommended / High Performance] Use regular expressions from the local dictionary for instant offline translation without querying the API.",
-  
   "gui.skyblock_translator.group.keybinds": "⌨ Configure Hotkeys",
   "gui.skyblock_translator.opt.key_settings": "⚙ Open Settings",
   "gui.skyblock_translator.opt.key_settings.desc": "[Stable] Hotkey to open the mod's configuration GUI.",
   "gui.skyblock_translator.opt.key_toggle": "🔄 Toggle Translator",
   "gui.skyblock_translator.opt.key_toggle.desc": "[Stable] Hotkey to quickly enable or disable all translator functions in-game.",
-  
   "gui.skyblock_translator.group.api": "🔑 API Parameters",
   "gui.skyblock_translator.opt.provider": "🔑 Translation Provider",
   "gui.skyblock_translator.opt.provider.desc": "[Stable] Choose translation service. Google Free is free. DeepL and Yandex require an API key, but offer better translation quality.",
@@ -32,10 +27,8 @@
   "gui.skyblock_translator.opt.showkey.desc": "[Stable] Whether to reveal the characters in the API key field.",
   "gui.skyblock_translator.opt.key": "📝 API Key",
   "gui.skyblock_translator.opt.key.desc": "[Stable] API key for the selected paid provider.",
-
   "gui.skyblock_translator.cat.chat": "💬 Chat",
   "gui.skyblock_translator.cat.chat.tooltip": "Settings for translating chat messages and outgoing text",
-  
   "gui.skyblock_translator.group.chat": "💬 Chat Settings",
   "gui.skyblock_translator.opt.translate_chat": "💬 Translate Chat",
   "gui.skyblock_translator.opt.translate_chat.desc": "[Recommended / Stable] Enables or disables translation of messages in chat.",
@@ -51,7 +44,6 @@
   "gui.skyblock_translator.opt.hover_original.desc": "[Recommended / Stable] Displays the original English message in a tooltip when hovering over translated chat text.",
   "gui.skyblock_translator.opt.outgoing": "📤 Auto-translate Outgoing",
   "gui.skyblock_translator.opt.outgoing.desc": "[Experimental / Use with care] Automatically translates your messages from Russian to English before sending them to the chat.",
-
   "gui.skyblock_translator.group.channels": "🔍 Chat Channels",
   "gui.skyblock_translator.opt.guild_chat": "🛡 Translate Guild Chat",
   "gui.skyblock_translator.opt.guild_chat.desc": "[Stable] Whether to translate messages in guild and officer chats.",
@@ -65,10 +57,8 @@
   "gui.skyblock_translator.opt.public_chat.desc": "[Stable] Whether to translate general player chat in lobby/world.",
   "gui.skyblock_translator.opt.system_chat": "🤖 Translate System Messages",
   "gui.skyblock_translator.opt.system_chat.desc": "[Recommended / Stable] Whether to translate server system messages.",
-
   "gui.skyblock_translator.cat.world": "🌍 Game World",
   "gui.skyblock_translator.cat.world.tooltip": "Settings for translating entities and texts in the world",
-  
   "gui.skyblock_translator.group.entities": "🌍 Entities and Texts",
   "gui.skyblock_translator.opt.holograms": "🔮 Translate Holograms",
   "gui.skyblock_translator.opt.holograms.desc": "[Stable / Recommended] Enables translation of floating 3D texts and holograms.",
@@ -78,10 +68,8 @@
   "gui.skyblock_translator.opt.npc_names.desc": "[Not Recommended / API Spam] Enables translation of friendly NPC names.",
   "gui.skyblock_translator.opt.translate_tablist": "📋 Translate Tab List",
   "gui.skyblock_translator.opt.translate_tablist.desc": "[Recommended / Stable] Enables translation of statistics and server info in the player list (Tab). Recommended to use with Offline Regex.",
-
   "gui.skyblock_translator.cat.gui": "🖥 Interface",
   "gui.skyblock_translator.cat.gui.tooltip": "Settings for translating GUI elements and items",
-  
   "gui.skyblock_translator.group.gui": "🖥 GUI Elements",
   "gui.skyblock_translator.opt.tooltips": "📜 Item Lore",
   "gui.skyblock_translator.opt.tooltips.desc": "[Recommended / Stable] Enables translation of item descriptions in inventories.",
@@ -101,10 +89,8 @@
   "gui.skyblock_translator.opt.titles.desc": "[Recommended / Stable] Enables translation of container/menu titles.",
   "gui.skyblock_translator.opt.scoreboard": "📊 Sidebar (Scoreboard)",
   "gui.skyblock_translator.opt.scoreboard.desc": "[Recommended / Stable] Enables translation of scoreboard sidebar lines. Fully compatible with offline regex.",
-
   "gui.skyblock_translator.cat.filters": "🛡 Filters",
   "gui.skyblock_translator.cat.filters.tooltip": "Settings for ignoring and filtering technical text",
-  
   "gui.skyblock_translator.group.technical_filters": "🛡 Technical Filters",
   "gui.skyblock_translator.opt.ignore_cooldowns": "⏳ Skip Ability Cooldowns",
   "gui.skyblock_translator.opt.ignore_cooldowns.desc": "[Recommended / Stable] Ignore ability cooldowns and recharge messages in chat.",
@@ -128,10 +114,8 @@
   "gui.skyblock_translator.opt.ignore_urls.desc": "[Recommended / Stable] Ignore hyperlinks and server IP addresses.",
   "gui.skyblock_translator.opt.ignore_dates": "📅 Skip Dates & Lobbies",
   "gui.skyblock_translator.opt.ignore_dates.desc": "[Recommended / Stable] Ignore timestamps, dates, and technical lobby names.",
-
   "gui.skyblock_translator.cat.cache": "💾 Cache & Info",
   "gui.skyblock_translator.cat.cache.tooltip": "Clear cache, reset settings, and support",
-  
   "gui.skyblock_translator.group.actions": "💾 Actions",
   "gui.skyblock_translator.opt.clear_cache": "🧹 Clear Translation Cache",
   "gui.skyblock_translator.opt.clear_cache.desc": "[Stable] Deletes the saved local translation cache from disk.",
@@ -141,10 +125,12 @@
   "gui.skyblock_translator.opt.report.desc": "[Stable] Open the GitHub repository to report mod code bugs or crashes.",
   "gui.skyblock_translator.opt.suggest_translation": "💡 Suggest Translation",
   "gui.skyblock_translator.opt.suggest_translation.desc": "[Stable] Open the dictionary GitHub repository to suggest new word translations.",
-
   "gui.skyblock_translator.cat.language": "🌐 Select Language",
   "gui.skyblock_translator.cat.language.tooltip": "Choose the target language for in-game translations",
   "gui.skyblock_translator.group.language_select": "🌐 Выберите язык / Select Language",
   "gui.skyblock_translator.lang_selected": "This language is already selected",
-  "gui.skyblock_translator.lang_select_btn": "Click to switch to %s"
+  "gui.skyblock_translator.lang_select_btn": "Click to switch to %s",
+  "key.category.skyblock_translator.keys": "Skyblock Translator",
+  "gui.skyblock_translator.opt.only_hypixel": "Only on Hypixel",
+  "gui.skyblock_translator.opt.only_hypixel.desc": "Translate only while connected to hypixel.net or hypixel.io. Disable to test in singleplayer or on another server."
 }

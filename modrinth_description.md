@@ -1,93 +1,43 @@
-# 🌍 SkyBlock Translator
+# SkyBlock Translator — 1.2.2
 
-[![Minecraft Version](https://img.shields.io/badge/Minecraft-1.21.11%20%7C%2026.1.2%20%7C%2026.2%20%7C%2026.3-blue.svg?logo=minecraft&color=62B036)](https://www.minecraft.net/)
-[![Loader](https://img.shields.io/badge/Loader-Fabric-lightgrey.svg?logo=fabric&color=E2DBCE)](https://fabricmc.net/)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/fridorin/Skyblock-Translator-Mod/blob/main/LICENSE)
-[![GitHub](https://img.shields.io/badge/GitHub-Repository-blue.svg?logo=github)](https://github.com/fridorin/Skyblock-Translator-Mod)
+Client-side Fabric translation for Hypixel SkyBlock. Supports Minecraft **1.21.11, 26.1.2, 26.2 and 26.3**. Choose the file matching your game version.
 
-**SkyBlock Translator** is a high-performance, client-side translation mod custom-built for **Hypixel SkyBlock**. It translates chat messages, item lore, chest titles, holograms, player tab lists, and entities from English to your target language (default is Russian, with bundled Russian and French dictionaries and online translation for 30+ languages) in real-time.
+**Required:** [Fabric Loader](https://fabricmc.net/use/installer/) 0.19.5+, [Fabric API](https://modrinth.com/mod/fabric-api) and [YACL](https://modrinth.com/mod/yacl), each for the correct Minecraft version. Java 21 for 1.21.11; Java 25 for 26.x. [Mod Menu](https://modrinth.com/mod/modmenu) is optional.
 
-Unlike generic translation mods, SkyBlock Translator understands Hypixel's unique formatting, ensuring your game remains fast, your screen stays clean, and your interactive chat links work flawlessly.
+## English
 
----
+Translate chat, NPC dialogue, item lore/names, inventory titles, entity names, Tab and the optional scoreboard. Russian and French dictionaries are included for offline matches; other phrases/languages use Google Free, DeepL API Free or Yandex Cloud. The language menu offers 30 languages, subject to provider support.
 
-### 🌐 Описание на русском (Russian Summary)
-**SkyBlock Translator** — это клиентский Fabric-мод для автоматического перевода с английского на русский (и другие языки) в реальном времени, оптимизированный под **Hypixel SkyBlock**.
+Open settings with **K** or `/translator`; use `/translator setlang fr` to select French. The default language is Russian and translation is limited to Hypixel by default. Hold Shift to bypass new translations; already translated chat history is not automatically restored. Separate-line chat mode retains the original message's interactions. Item-name translation can be disabled for easier Auction House/Bazaar searches.
 
-Подробная документация, инструкции и базы перевода доступны на русском языке в **[GitHub README_ru.md](https://github.com/fridorin/Skyblock-Translator-Mod/blob/main/README_ru.md)**.
+Online translation sends text to the provider; DeepL/Yandex can fall back to Google. Player-name placeholders do not guarantee anonymization. Outgoing translation sends ordinary English chat messages in order. No guarantee of server approval or protection from bans is implied.
 
----
+[English documentation](https://github.com/fridorin/Skyblock-Translator-Mod/blob/main/README.md)
 
-## 🌟 Key Features
+## Русский
 
-* ⚡ **Asynchronous & Non-Blocking**: Network requests run on a dedicated background thread pool. Your game FPS will never drop or stutter while waiting for a translation.
-* 📴 **Instant Offline Translation**: Item stats, common phrases, and enchantments translate instantly offline using local dictionary tables and highly optimized regex matching.
-* 💬 **Smart Chat Display Modes**:
-  * `Separate Line (Recommended)`: Outputs translation as a sub-line below the original message, **preserving all original clickable links** (coop invites, auction links, profile IDs).
-  * `Hover to Reveal`: Hover over any translated chat message to see the original English text.
-* 🛡️ **Technical Spam Filters**: Automatically filters out combat damage numbers (`12,450 crit`), mod prefixes (NEU, Skytils, SBA), cooldowns, UUIDs, dates, and server IP addresses to conserve API limits.
-* 🛑 **Shift Bypass (Panic Button)**: Hold down the **Shift** key while reading chat or browsing items to instantly view original English text.
-* 🧹 **Optimized Memory Management**: Built with bounded LRU caches to prevent memory leaks and ensure stable performance even after hours of gameplay.
+Клиентский перевод чата, диалогов NPC, названий и описаний предметов, заголовков инвентаря, имён сущностей, Tab и scoreboard. Русский и французский словари включены в мод; остальные фразы и языки переводятся онлайн.
 
----
+Настройки: **K** или `/переводчик`. По умолчанию выбран русский и включён режим «Только на Hypixel». Shift приостанавливает новые переводы, но не восстанавливает историю чата. Перевод названий предметов можно отключить, чтобы сохранить исходные названия для поиска. Онлайн-перевод передаёт текст провайдеру, а при ошибках DeepL/Yandex возможен переход на Google. Гарантий одобрения сервером нет.
 
-## 🛠️ In-Game Commands
+[Документация на русском](https://github.com/fridorin/Skyblock-Translator-Mod/blob/main/README_ru.md)
 
-All commands can be executed using `/translator` (or Russian alias `/переводчик`).
+## Français
 
-| Command | Description |
-| :--- | :--- |
-| `/translator` | Opens the graphical settings GUI (requires `YetAnotherConfigLib`). |
-| `/translator add <en> = <ru>` | Saves a custom phrase mapping directly to your `user_dictionary.json`. |
-| `/translator lookup <phrase>` | Checks if a term is translated and shows its source (User vs GitHub). |
-| `/translator toggle <option>` | Toggles a specific config parameter on or off. |
-| `/translator setlang <lang>` | Changes target language (e.g. `ru`, `de`, `es`). |
-| `/translator setprovider <API>`| Swaps translation engines (`GOOGLE_FREE`, `DEEPL_FREE`, `YANDEX`). |
-| `/translator clear-cache` | Clears local translation cache with sound and toast notification. |
-| `/translator reload` | Reloads config and local user dictionary files. |
-| `/translator copy-hand` | Copies clean JSON translation template of the item in hand. |
-| `/translator update` | Pulls the latest translation dictionary from GitHub immediately. |
+Traduction côté client du chat, des dialogues PNJ, des objets, des titres d'inventaire, des noms d'entités, de Tab et du scoreboard facultatif. Dictionnaires russe et français inclus ; les autres phrases/langues utilisent un service en ligne.
 
----
+Paramètres : **K** ou `/translator`. Sélectionnez le français avec `/translator setlang fr`. Le russe et « Uniquement sur Hypixel » sont activés par défaut. Maj suspend les nouvelles traductions sans restaurer l'historique du chat. Désactivez la traduction des noms pour faciliter les recherches d'objets. La traduction en ligne transmet du texte au service et peut utiliser Google en secours. Aucune approbation du serveur n'est garantie.
 
-## 🎮 Recommended Configuration
+[Documentation française](https://github.com/fridorin/Skyblock-Translator-Mod/blob/main/README_fr.md)
 
-Configure settings easily via the `/translator` YACL GUI menu:
+## Commands / Команды / Commandes
 
-* ⚙️ **Main Settings**:
-  * `Enable Translator`: Master toggle **[Recommended]**
-  * `Disable on Shift`: Hold Shift to reveal raw English text **[Recommended]**
-  * `Regex Translation (Offline)`: High-performance offline stats translation **[Recommended]**
-* 💬 **Chat Settings**:
-  * `Translate Chat`: Master chat switch **[Recommended]**
-  * `Chat Display Mode`: `Separate Line` **[Safest / Recommended]**
-  * `Hover to Show Original`: Displays original text on hover **[Recommended]**
-* 🖥️ **Interface & Lore**:
-  * `Item Descriptions (Lore)`: Translates item lore and stats **[Recommended]**
-  * `Item Names`: Translates item titles **[Not Recommended — keep OFF to preserve Auction House/Bazaar search]**
-  * `Menu/Inventory Titles`: Translates chest titles **[Recommended]**
+`/translator` · `/translator setlang fr` · `/translator setprovider GOOGLE_FREE` · `/translator toggle chat` · `/translator toggle tooltips` · `/translator toggle titles` · `/translator toggle scoreboard` · `/translator toggle npc` · `/translator toggle outgoing` · `/translator add Strength = Force` · `/translator lookup Strength` · `/translator clear-cache` · `/translator reload` · `/translator copy-hand` · `/translator update` · `/translator test`
 
----
+## Links
 
-## 🔑 Translation Providers
-
-1. **Google Free (Default)**: Free, keyless, works out of the box without any setup.
-2. **DeepL API Free**: Supports up to 500,000 chars/month for free. Obtain a free key from [deepl.com](https://www.deepl.com/) and paste it into `/translator` config.
-3. **Yandex Cloud Translate**: Supports Yandex Cloud Translate API credentials.
-
----
-
-## 🔒 Safety & Rules Compliance
-
-* 🎮 **Hypixel Safe**: 100% client-side. The mod does not send suspicious custom packets to the server.
-* ⏱️ **Human Typing Emulation**: Outgoing chat translations are queued with a randomized delay (100ms–300ms) to mimic organic typing and avoid watchdog spam triggers.
-* 🛡️ **Thread Safe**: All chat appends and UI updates run on the main Minecraft loop scheduler, preventing race conditions and rendering glitches.
-
----
-
-## 🔗 Links & Resources
-
-* 📜 **Full Documentation**: [GitHub Repository](https://github.com/fridorin/Skyblock-Translator-Mod)
-* 🇷🇺 **Russian README**: [README_ru.md](https://github.com/fridorin/Skyblock-Translator-Mod/blob/main/README_ru.md)
-* 🇫🇷 **French README**: [README_fr.md](https://github.com/fridorin/Skyblock-Translator-Mod/blob/main/README_fr.md)
-* 🐛 **Report Issues & Suggest Translations**: [GitHub Issues Tracker](https://github.com/fridorin/Skyblock-Translator-Mod/issues)
+- [GitHub repository](https://github.com/fridorin/Skyblock-Translator-Mod)
+- [Report a bug](https://github.com/fridorin/Skyblock-Translator-Mod/issues/new)
+- [1.2.2 changelog, including 1.2.1 fixes](https://github.com/fridorin/Skyblock-Translator-Mod/blob/main/release-notes/v1.2.2.md)
+- [Hypixel modification rules](https://support.hypixel.net/hc/en-us/articles/6472550754962-Hypixel-Allowed-Modifications)
+- [MIT license](https://github.com/fridorin/Skyblock-Translator-Mod/blob/main/LICENSE)

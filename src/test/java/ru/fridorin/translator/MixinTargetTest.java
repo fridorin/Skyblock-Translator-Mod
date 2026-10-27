@@ -45,14 +45,14 @@ public class MixinTargetTest {
                     String targetName = ((List<String>) value(injection, "method")).getFirst();
                     List<MethodNode> targets = target.methods.stream().filter(m -> m.name.equals(targetName)).toList();
                     assertFalse(name + ": missing " + targetName, targets.isEmpty());
-                    if (name.equals("Gui")) {
+                    if (name.equals("Gui") || name.equals("Screen")) {
                         AnnotationNode at = ((List<AnnotationNode>) value(injection, "at")).getFirst();
                         String invocation = (String) value(at, "target");
                         long matches = targets.stream().flatMap(m -> java.util.Arrays.stream(m.instructions.toArray()))
                                 .filter(i -> i instanceof MethodInsnNode)
                                 .map(i -> (MethodInsnNode) i)
                                 .filter(i -> invocation.equals("L" + i.owner + ";" + i.name + i.desc)).count();
-                        assertEquals("Scoreboard drawing hook must match all three text calls", 3, matches);
+                        assertEquals("Drawing hook must match the game's text calls: " + name, name.equals("Gui") ? 3 : 2, matches);
                     }
                 }
             }

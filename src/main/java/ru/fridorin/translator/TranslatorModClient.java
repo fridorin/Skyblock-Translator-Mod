@@ -50,6 +50,10 @@ public class TranslatorModClient implements ClientModInitializer {
         .expireAfterWrite(10, TimeUnit.SECONDS)
         .build();
 
+    private static final com.google.common.cache.Cache<String, Boolean> UNTRANSLATED_COMPONENTS = com.google.common.cache.CacheBuilder.newBuilder()
+        .maximumSize(2000).expireAfterWrite(1, TimeUnit.SECONDS).build();
+    private static CompletableFuture<Void> outgoingQueue = CompletableFuture.completedFuture(null);
+
     // Precompiled regex for detecting public chat messages with any Hypixel rank (e.g. [VIP+], [MVP++], [HELPER])
     private static final Pattern PUBLIC_CHAT_PATTERN = Pattern.compile("^(?:\\[[A-Za-z0-9+ ]+\\] )?\\w+: .*");
     
@@ -61,6 +65,7 @@ public class TranslatorModClient implements ClientModInitializer {
         CACHE_GENERATION.incrementAndGet();
         COMPONENT_CACHE.invalidateAll();
         PENDING_COMPONENTS.invalidateAll();
+        UNTRANSLATED_COMPONENTS.invalidateAll();
     }
 
     private static KeyMapping keyOpenSettings;
@@ -90,8 +95,9 @@ public class TranslatorModClient implements ClientModInitializer {
         });
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            TranslationCache.shutdown();
+            clearComponentCache();
             TranslationService.shutdown();
+            TranslationCache.shutdown();
             try {
                 watchdogScheduler.shutdown();
             } catch (Exception e) {
@@ -146,7 +152,7 @@ public class TranslatorModClient implements ClientModInitializer {
 
         ClientReceiveMessageEvents.ALLOW_GAME.register((message, overlay) -> {
             if (overlay) return true;
-            if (!initialized || isTranslationDisabled() || !TranslatorConfigManager.getConfig().translateNpcDialogues) return true;
+            if (!initialized || isTranslationDisabled() || !TranslatorConfigManager.getConfig().translateChat) return true;
             return handleIncomingChatEvent(message);
         });
 
@@ -159,17 +165,17 @@ public class TranslatorModClient implements ClientModInitializer {
 
             if (!TranslationService.containsNonEnglishLetters(message)) return true;
 
-            TranslationService.translateOutgoingAsync(message).thenAccept(translated -> {
-                String toSend = (translated != null && !translated.trim().isEmpty()) ? translated : message;
-                Minecraft client = Minecraft.getInstance();
-                client.execute(() -> {
-                    if (client.getConnection() != null) {
-                        TranslationService.runWithBypass(() -> {
-                            client.getConnection().sendChat(toSend);
-                        });
-                    }
-                });
-            });
+            Minecraft client = Minecraft.getInstance();
+            var connection = client.getConnection();
+            outgoingQueue = outgoingQueue.handle((ignored, error) -> null)
+                    .thenCompose(ignored -> client.getConnection() == connection
+                            ? TranslationService.translateOutgoingAsync(message) : CompletableFuture.completedFuture(message))
+                    .handle((translated, error) -> error == null && translated != null && !translated.isBlank() ? translated : message)
+                    .thenAcceptAsync(toSend -> {
+                        if (connection != null && client.getConnection() == connection) {
+                            TranslationService.runWithBypass(() -> connection.sendChat(toSend));
+                        }
+                    }, client::execute);
 
             return false;
         });
@@ -233,7 +239,12 @@ public class TranslatorModClient implements ClientModInitializer {
                 .then(ClientCommandManager.literal("setlang")
                     .then(ClientCommandManager.argument("lang", StringArgumentType.string())
                         .executes(context -> {
-                            String lang = StringArgumentType.getString(context, "lang");
+                            String requestedLanguage = StringArgumentType.getString(context, "lang");
+                            String lang = TranslatorConfigManager.normalizeLanguage(requestedLanguage);
+                            if (!lang.equalsIgnoreCase(requestedLanguage.trim())) {
+                                context.getSource().sendFeedback(Component.literal("§c[SkyBlock Translator] Invalid language code (example: ru, fr, zh-cn)."));
+                                return 0;
+                            }
                             TranslatorConfig config = TranslatorConfigManager.getConfig();
                             config.targetLanguage = lang;
                             TranslatorConfigManager.save();
@@ -246,7 +257,7 @@ public class TranslatorModClient implements ClientModInitializer {
                 .then(ClientCommandManager.literal("setprovider")
                     .then(ClientCommandManager.argument("provider", StringArgumentType.string())
                         .executes(context -> {
-                            String provider = StringArgumentType.getString(context, "provider").toUpperCase();
+                            String provider = StringArgumentType.getString(context, "provider").toUpperCase(java.util.Locale.ROOT);
                             if (provider.equals("GOOGLE_FREE") || provider.equals("DEEPL_FREE") || provider.equals("YANDEX")) {
                                 TranslatorConfig config = TranslatorConfigManager.getConfig();
                                 config.apiProvider = provider;
@@ -347,7 +358,7 @@ public class TranslatorModClient implements ClientModInitializer {
                             String plain = line.getString();
                             String clean = plain.replaceAll("§x(?:§[0-9a-fA-F]){6}|§.", "").trim();
                             if (!clean.isEmpty()) {
-                                template.put(clean.toLowerCase(), "");
+                                template.put(clean.toLowerCase(java.util.Locale.ROOT), "");
                             }
                         }
                         String json = new com.google.gson.GsonBuilder().setPrettyPrinting().create().toJson(template);
@@ -378,7 +389,7 @@ public class TranslatorModClient implements ClientModInitializer {
                         TranslatorConfig config = TranslatorConfigManager.getConfig();
                         context.getSource().sendFeedback(Component.literal("§a[SkyBlock Translator] Testing connection to " + config.apiProvider + "..."));
                         long start = System.currentTimeMillis();
-                        TranslationService.translateAsync("Hello").thenAccept(translated -> {
+                        TranslationService.testConnectionAsync().thenAccept(translated -> {
                             long duration = System.currentTimeMillis() - start;
                             Minecraft client = Minecraft.getInstance();
                             client.execute(() -> {
@@ -412,41 +423,10 @@ public class TranslatorModClient implements ClientModInitializer {
     public static String componentToLegacy(Component component) {
         if (component == null) return "";
         StringBuilder sb = new StringBuilder();
-
-        Style style = component.getStyle();
-        sb.append(styleToLegacyCodes(style));
-
-        if (component.getContents() instanceof net.minecraft.network.chat.contents.PlainTextContents) {
-            sb.append(((net.minecraft.network.chat.contents.PlainTextContents) component.getContents()).text());
-        } else if (component.getContents() instanceof net.minecraft.network.chat.contents.TranslatableContents) {
-            net.minecraft.network.chat.contents.TranslatableContents translatable = (net.minecraft.network.chat.contents.TranslatableContents) component.getContents();
-            String key = translatable.getKey();
-            String localized = net.minecraft.client.resources.language.I18n.get(key);
-            Object[] args = translatable.getArgs();
-            if (args != null && args.length > 0) {
-                try {
-                    Object[] formattedArgs = new Object[args.length];
-                    for (int i = 0; i < args.length; i++) {
-                        if (args[i] instanceof Component) {
-                            formattedArgs[i] = componentToLegacy((Component) args[i]);
-                        } else {
-                            formattedArgs[i] = args[i];
-                        }
-                    }
-                    sb.append(String.format(localized, formattedArgs));
-                } catch (Exception e) {
-                    LOGGER.warn("Failed to format translated arguments for key: {}", key, e);
-                    sb.append(localized);
-                }
-            } else {
-                sb.append(localized);
-            }
-        }
-
-        for (Component sibling : component.getSiblings()) {
-            sb.append(componentToLegacy(sibling));
-        }
-
+        component.visit((style, content) -> {
+            sb.append(styleToLegacyCodes(style)).append(content);
+            return java.util.Optional.empty();
+        }, Style.EMPTY);
         return sb.toString();
     }
 
@@ -461,7 +441,7 @@ public class TranslatorModClient implements ClientModInitializer {
                     sb.append("§").append(c);
                 }
             } else {
-                String colorStr = hex.toLowerCase();
+                String colorStr = hex.toLowerCase(java.util.Locale.ROOT);
                 switch (colorStr) {
                     case "black": sb.append("§0"); break;
                     case "dark_blue": sb.append("§1"); break;
@@ -621,10 +601,12 @@ public class TranslatorModClient implements ClientModInitializer {
         final String cacheKey = generation + ":" + legacyText;
         Component cached = COMPONENT_CACHE.getIfPresent(cacheKey);
         if (cached != null) return cached;
+        if (UNTRANSLATED_COMPONENTS.getIfPresent(cacheKey) != null || PENDING_COMPONENTS.getIfPresent(cacheKey) != null) return component;
 
         String immediate = TranslationService.getImmediateTranslation(trimmed);
         if (immediate != null) {
             if (TranslationService.isTranslationSame(trimmed, immediate)) {
+                UNTRANSLATED_COMPONENTS.put(cacheKey, true);
                 return component;
             }
             String restored = " ".repeat(leadingSpaces) + immediate + " ".repeat(trailingSpaces);
@@ -641,6 +623,8 @@ public class TranslatorModClient implements ClientModInitializer {
             if (translatedLegacy != null && !translatedLegacy.trim().isEmpty() && !translatedLegacy.equals(trimmed)) {
                 String restored = " ".repeat(finalLeadingSpaces) + translatedLegacy + " ".repeat(finalTrailingSpaces);
                 if (generation == getCacheGeneration()) COMPONENT_CACHE.put(cacheKey, legacyToComponent(restored));
+            } else {
+                UNTRANSLATED_COMPONENTS.put(cacheKey, true);
             }
         }).whenComplete((result, error) -> PENDING_COMPONENTS.invalidate(cacheKey));
         
@@ -648,7 +632,7 @@ public class TranslatorModClient implements ClientModInitializer {
     }
 
     public static CompletableFuture<Component> translateComponentAsync(Component component) {
-        if (component == null) {
+        if (component == null || isTranslationDisabled()) {
             return CompletableFuture.completedFuture(component);
         }
 
@@ -733,6 +717,9 @@ public class TranslatorModClient implements ClientModInitializer {
             return true;
         }
 
+        Minecraft chatClient = Minecraft.getInstance();
+        var chatConnection = chatClient.getConnection();
+        long chatGeneration = getCacheGeneration();
         translateComponentAsync(message).thenAccept(translated -> {
             if (translated == null) {
                 return;
@@ -754,7 +741,7 @@ public class TranslatorModClient implements ClientModInitializer {
                 finalMessage = combined;
             } else if ("SEPARATE_LINE".equalsIgnoreCase(config.chatDisplayMode)) {
                 TextColor firstColor = getFirstColor(message);
-                MutableComponent prefix = Component.literal("\n↳ [" + config.targetLanguage.toUpperCase() + "] ");
+                MutableComponent prefix = Component.literal("\n↳ [" + config.targetLanguage.toUpperCase(java.util.Locale.ROOT) + "] ");
                 if (firstColor != null) {
                     prefix.setStyle(Style.EMPTY.withColor(firstColor));
                 } else {
@@ -770,7 +757,7 @@ public class TranslatorModClient implements ClientModInitializer {
                 finalMessage = message.copy().append(translationLine);
             } else {
                 TextColor firstColor = getFirstColor(message);
-                MutableComponent prefix = Component.literal("↳ [" + config.targetLanguage.toUpperCase() + "] ");
+                MutableComponent prefix = Component.literal("↳ [" + config.targetLanguage.toUpperCase(java.util.Locale.ROOT) + "] ");
                 if (firstColor != null) {
                     prefix.setStyle(Style.EMPTY.withColor(firstColor));
                 } else {
@@ -791,6 +778,7 @@ public class TranslatorModClient implements ClientModInitializer {
 
             final Component finalMsg = finalMessage;
             Minecraft.getInstance().execute(() -> {
+                if (chatClient.getConnection() != chatConnection || chatGeneration != getCacheGeneration()) return;
                 if (Minecraft.getInstance().gui != null && Minecraft.getInstance().gui.getChat() instanceof ru.fridorin.translator.ChatUpdateExtension) {
                     ((ru.fridorin.translator.ChatUpdateExtension) Minecraft.getInstance().gui.getChat()).skyblock_translator$updateMessage(message, finalMsg);
                 }
@@ -800,30 +788,24 @@ public class TranslatorModClient implements ClientModInitializer {
         return true;
     }
 
+    public static boolean isHypixelAddress(String address) {
+        if (address == null) return false;
+        String host = address.trim().toLowerCase(java.util.Locale.ROOT).replaceFirst(":\\d+$", "");
+        if (host.endsWith(".")) host = host.substring(0, host.length() - 1);
+        return host.equals("hypixel.net") || host.endsWith(".hypixel.net")
+                || host.equals("hypixel.io") || host.endsWith(".hypixel.io");
+    }
+
     public static boolean isTranslationDisabled() {
         TranslatorConfig config = TranslatorConfigManager.getConfig();
-        if (!config.enabled) return true;
-        if ("en".equalsIgnoreCase(config.targetLanguage)) return true;
-        
+        if (!initialized || !config.enabled || TranslationService.isBypassed() || bypassTranslation
+                || "en".equalsIgnoreCase(config.targetLanguage)) return true;
+        Minecraft client = Minecraft.getInstance();
+        if (client == null || !client.isSameThread()) return true;
         if (config.onlyOnHypixel) {
-            net.minecraft.client.multiplayer.ServerData currentServer = net.minecraft.client.Minecraft.getInstance().getCurrentServer();
-            if (currentServer != null) {
-                String serverAddress = currentServer.ip.toLowerCase();
-                if (!serverAddress.contains("hypixel.net") && !serverAddress.contains("hypixel.io")) {
-                    return true;
-                }
-            } else if (!net.minecraft.client.Minecraft.getInstance().hasSingleplayerServer()) {
-                // Not on any server and not in singleplayer (maybe main menu), disable to be safe
-                // (Wait, actually if they are in singleplayer, should we allow it? Let's just block if it's explicitly not hypixel)
-            }
+            var server = client.getCurrentServer();
+            if (server == null || !isHypixelAddress(server.ip)) return true;
         }
-
-        try {
-            if (config.disableOnShift && net.minecraft.client.Minecraft.getInstance().hasShiftDown()) {
-                return true;
-            }
-        } catch (Exception e) {
-        }
-        return false;
+        return config.disableOnShift && client.hasShiftDown();
     }
 }
