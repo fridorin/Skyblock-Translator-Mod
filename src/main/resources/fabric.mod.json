@@ -27,7 +27,7 @@
 		"skyblock_translator.client.mixins.json"
 	],
 	"depends": {
-		"fabricloader": ">=0.19.5",
+		"fabricloader": ">=${fabric_loader_min}",
 		"minecraft": "${minecraft}",
 		"java": ">=${java}",
 		"fabric-api": ">=${fabric_api}",

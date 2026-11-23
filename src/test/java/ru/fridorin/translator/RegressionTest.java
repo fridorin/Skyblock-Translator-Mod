@@ -9,6 +9,7 @@ import java.lang.reflect.Field;
 import ru.fridorin.translator.config.TranslatorConfigManager;
 import ru.fridorin.translator.service.SkyblockDictionary;
 import ru.fridorin.translator.service.TranslationService;
+import ru.fridorin.translator.service.TranslationScope;
 import ru.fridorin.translator.cache.TranslationCache;
 
 public class RegressionTest {
@@ -31,13 +32,12 @@ public class RegressionTest {
         TranslatorConfigManager.getConfig().targetLanguage = "ru";
         TranslatorConfigManager.getConfig().enabled = true;
         TranslatorConfigManager.getConfig().apiProvider = "GOOGLE_FREE";
-        TranslatorConfigManager.getConfig().apiKey = "";
     }
 
     @Test
     public void formattedStatsTranslateWithoutApi() throws Exception {
         dictionary().put("strength", "Сила");
-        String translated = TranslationService.getImmediateTranslation("§cStrength§7: §a+150");
+        String translated = TranslationService.getImmediateTranslation("§cStrength§7: §a+150", TranslationScope.WORLD);
         assertNotNull(translated);
         assertTrue(translated, translated.contains("Сила"));
         assertTrue(translated, translated.contains("+150"));
@@ -47,7 +47,7 @@ public class RegressionTest {
     @Test
     public void formattingInsideDictionaryPhraseDoesNotBlockTranslation() throws Exception {
         dictionary().put("critical damage", "Критический урон");
-        String translated = TranslationService.getImmediateTranslation("§cCritical §6Damage");
+        String translated = TranslationService.getImmediateTranslation("§cCritical §6Damage", TranslationScope.WORLD);
         assertNotNull(translated);
         assertTrue(translated, translated.contains("Критический урон"));
     }
@@ -76,8 +76,8 @@ public class RegressionTest {
                 language.setAccessible(true);
                 language.set(null, "fr");
             } catch (ReflectiveOperationException error) { throw new AssertionError(error); }
-            TranslationCache.put("ITEM", "Objet");
-            assertEquals("Objet", TranslationCache.get("item"));
+            TranslationCache.put("ITEM", "Objet", "fr", TranslatorModClient.getCacheGeneration(), "GOOGLE_FREE", TranslationScope.WORLD);
+            assertEquals("Objet", TranslationCache.get("item", TranslationScope.WORLD));
         } finally {
             Locale.setDefault(original);
         }
@@ -113,13 +113,13 @@ public class RegressionTest {
         config.targetLanguage = "../../outside";
         config.apiProvider = null;
         config.chatDisplayMode = "invalid";
-        config.apiKey = null;
+        config.deeplApiKey = null;
         config.translateTooltips = false;
         TranslatorConfigManager.validate(config);
         assertEquals("ru", config.targetLanguage);
         assertEquals("GOOGLE_FREE", config.apiProvider);
         assertEquals("SEPARATE_LINE", config.chatDisplayMode);
-        assertEquals("", config.apiKey);
+        assertEquals("", config.deeplApiKey);
         assertFalse(config.translateTooltips);
         assertEquals("zh-cn", TranslatorConfigManager.normalizeLanguage(" ZH-CN "));
     }
@@ -128,12 +128,12 @@ public class RegressionTest {
     public void staleTranslationsCannotRepopulateClearedCache() {
         long generation = TranslatorModClient.getCacheGeneration();
         TranslatorModClient.clearComponentCache();
-        TranslationCache.put("Stale phrase", "Старая фраза", "ru", generation);
-        assertNull(TranslationCache.get("Stale phrase"));
-        TranslationCache.put("Fresh phrase", "Новая фраза", "ru", TranslatorModClient.getCacheGeneration());
-        assertEquals("Новая фраза", TranslationCache.get("Fresh phrase"));
+        TranslationCache.put("Stale phrase", "Старая фраза", "ru", generation, "GOOGLE_FREE", TranslationScope.WORLD);
+        assertNull(TranslationCache.get("Stale phrase", TranslationScope.WORLD));
+        TranslationCache.put("Fresh phrase", "Новая фраза", "ru", TranslatorModClient.getCacheGeneration(), "GOOGLE_FREE", TranslationScope.WORLD);
+        assertEquals("Новая фраза", TranslationCache.get("Fresh phrase", TranslationScope.WORLD));
         TranslatorConfigManager.getConfig().targetLanguage = "fr";
-        assertNull(TranslationCache.get("Fresh phrase"));
+        assertNull(TranslationCache.get("Fresh phrase", TranslationScope.WORLD));
     }
 
     @Test
@@ -170,6 +170,11 @@ public class RegressionTest {
     public void validTextAfterProgressBarIsNotDiscarded() {
         assertTrue(ru.fridorin.translator.service.SpamFilter.shouldIgnore("§a[||||  ]"));
         assertFalse(ru.fridorin.translator.service.SpamFilter.shouldIgnore("[---] Quest complete"));
+    }
+
+    @Test
+    public void incomingChatBeyondTranslationLimitSkipsSpamMatchingAndTranslation() {
+        assertTrue(ru.fridorin.translator.service.SpamFilter.shouldIgnore("Long chat line ".repeat(400)));
     }
 
     @Test
@@ -237,9 +242,10 @@ public class RegressionTest {
         activeField.setAccessible(true);
         for (String provider : java.util.List.of("DEEPL_FREE", "YANDEX")) {
             TranslatorConfigManager.getConfig().apiProvider = provider;
-            TranslatorConfigManager.getConfig().apiKey = "invalid\nkey";
+            TranslatorConfigManager.getConfig().deeplApiKey = "invalid\nkey";
+            TranslatorConfigManager.getConfig().yandexApiKey = "invalid\nkey";
             for (int i = 0; i < 4; i++) {
-                String result = TranslationService.translateAsync("Unlisted translation sentence " + provider + " " + (char) ('a' + i))
+                String result = TranslationService.translateAsync("Unlisted translation sentence " + provider + " " + (char) ('a' + i), TranslationScope.CHAT)
                         .get(1, java.util.concurrent.TimeUnit.SECONDS);
                 assertEquals("", result);
             }

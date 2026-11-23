@@ -11,7 +11,7 @@ public final class TooltipTranslationFilter {
     private boolean enchantmentDescription;
 
     public boolean shouldTranslate(String text, int index, TranslatorConfig config) {
-        String clean = text.replaceAll("§x(?:§[0-9a-fA-F]){6}|§.", "").trim();
+        String clean = TranslationService.stripFormatting(text).trim();
         if (clean.isEmpty()) {
             abilityDescription = false;
             enchantmentDescription = false;

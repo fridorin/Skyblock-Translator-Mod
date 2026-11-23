@@ -3,7 +3,7 @@ package ru.fridorin.translator.mixin;
 import ru.fridorin.translator.config.TranslatorConfig;
 import ru.fridorin.translator.config.TranslatorConfigManager;
 import ru.fridorin.translator.TranslatorModClient;
-import ru.fridorin.translator.service.TranslationService;
+import ru.fridorin.translator.service.TranslationScope;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.item.Item;
@@ -16,35 +16,32 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.List;
+import java.util.ArrayList;
 
 @Mixin(ItemStack.class)
 public class ItemStackMixin {
 
     @Inject(method = "getTooltipLines", at = @At("RETURN"), cancellable = true)
     private void onGetTooltipLines(Item.TooltipContext context, @Nullable Player player, TooltipFlag tooltipFlag, CallbackInfoReturnable<List<Component>> cir) {
-        if (TranslatorModClient.isTranslationDisabled() || TranslatorModClient.bypassTranslation) return;
-        
-        // Skip background indexing threads (like REI/JEI indexing) to avoid lags
-        if (!net.minecraft.client.Minecraft.getInstance().isSameThread()) return;
+        if (TranslatorModClient.isTranslationDisabled()) return;
 
         TranslatorConfig config = TranslatorConfigManager.getConfig();
         if (!config.translateTooltips) return;
 
-        if (TranslationService.isBypassed()) return;
-
         List<Component> originalLines = cir.getReturnValue();
         if (originalLines == null || originalLines.isEmpty()) return;
 
-        // Create a new list to avoid mutating caches from other mods (like REI or Skyblocker)
-        List<Component> newLines = new java.util.ArrayList<>(originalLines.size());
-
+        List<Component> newLines = null;
         var filter = new ru.fridorin.translator.service.TooltipTranslationFilter();
         for (int i = 0; i < originalLines.size(); i++) {
             Component line = originalLines.get(i);
-            newLines.add(filter.shouldTranslate(line.getString(), i, config)
-                    ? TranslatorModClient.translateComponent(line) : line);
+            if (!filter.shouldTranslate(line.getString(), i, config)) continue;
+            Component translated = TranslatorModClient.translateComponent(line, TranslationScope.TOOLTIP);
+            if (translated == line) continue;
+            if (newLines == null) newLines = new ArrayList<>(originalLines);
+            newLines.set(i, translated);
         }
 
-        cir.setReturnValue(newLines);
+        if (newLines != null) cir.setReturnValue(newLines);
     }
 }

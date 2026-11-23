@@ -1,192 +1,250 @@
 package ru.fridorin.translator.cache;
 
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonParseException;
+import com.google.gson.Strictness;
 import com.google.gson.reflect.TypeToken;
 import net.fabricmc.loader.api.FabricLoader;
-import java.io.File;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import ru.fridorin.translator.TranslatorModClient;
+import ru.fridorin.translator.config.TranslatorConfigManager;
+import ru.fridorin.translator.service.SkyblockDictionary;
+import ru.fridorin.translator.service.TranslationScope;
+import ru.fridorin.translator.util.AtomicFiles;
+
 import java.io.IOException;
-import java.lang.reflect.Type;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 public class TranslationCache {
     private static final Logger LOGGER = LoggerFactory.getLogger(TranslationCache.class);
-    private static final Gson GSON = new GsonBuilder().create();
-    private static File cacheFile;
-    private static String activeLanguage = "ru";
-    private static final int MAX_SIZE = 10000;
+    private static final Gson GSON = new GsonBuilder().setStrictness(Strictness.STRICT).create();
+    private static final TypeToken<Map<String, Entry>> ENTRIES_TYPE = new TypeToken<>() { };
+    private static final int MAX_ENTRIES = 10_000;
+    private static final int MAX_CHARACTERS = 8192;
+    private static final int MAX_FILE_BYTES = 16 * 1024 * 1024;
 
-    private static final com.google.common.cache.Cache<String, String> lruCache = com.google.common.cache.CacheBuilder.newBuilder()
-        .maximumSize(MAX_SIZE)
+    // An escaped JSON character takes at most six bytes. The minimum weight also caps entry count.
+    private static final long TTL_MILLIS = TimeUnit.DAYS.toMillis(7);
+    private static final int ENTRY_OVERHEAD = 192;
+
+    private record Entry(String text, String provider, TranslationScope scope, long expiresAt, boolean persistable) {
+        boolean validAt(long now) {
+            return expiresAt > now && expiresAt - now <= TTL_MILLIS;
+        }
+    }
+
+    private static final Cache<String, Entry> CACHE = CacheBuilder.newBuilder()
+        .expireAfterWrite(7, TimeUnit.DAYS)
+        .maximumWeight(MAX_FILE_BYTES - 2)
+        .weigher((String key, Entry value) -> Math.max(MAX_FILE_BYTES / MAX_ENTRIES + 1,
+                (key.length() + value.text().length()) * 6 + ENTRY_OVERHEAD))
         .build();
-
-    private static final Object SCHEDULER_LOCK = new Object();
+    private static final Object CACHE_LOCK = new Object();
+    private static final Object STORAGE_LOCK = new Object();
     private static final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-        Thread t = new Thread(r, "SkyblockTranslator-CacheSaver");
-        t.setDaemon(true);
-        return t;
+        Thread thread = new Thread(r, "SkyblockTranslator-CacheSaver");
+        thread.setDaemon(true);
+        return thread;
     });
-    private static ScheduledFuture<?> pendingSaveTask = null;
-    private static volatile boolean isDirty = false;
+    private static Path cacheFile;
+    private static String activeLanguage = "ru";
+    private static long clearGeneration;
+    private static ScheduledFuture<?> pendingSaveTask;
+    private static boolean dirty;
 
-    public static void loadForLanguage(String lang) {
-        lang = ru.fridorin.translator.config.TranslatorConfigManager.normalizeLanguage(lang);
-        synchronized (SCHEDULER_LOCK) {
-            if (isDirty) {
-                saveLocked();
+    public static void loadForLanguage(String language) {
+        String normalized = TranslatorConfigManager.normalizeLanguage(language);
+        Path directory = FabricLoader.getInstance().getConfigDir().resolve("skyblock_translator");
+        loadForLanguage(directory, normalized);
+    }
+
+    static void loadForLanguage(Path directory, String language) {
+        synchronized (STORAGE_LOCK) {
+            Path file = directory.resolve("cache_v2_" + language + ".json");
+            // Block writes to the previous cache while saving its final snapshot.
+            long originalClearGeneration;
+            Snapshot previous;
+            synchronized (CACHE_LOCK) {
+                previous = takeSnapshot();
+                CACHE.invalidateAll();
+                activeLanguage = language;
+                cacheFile = file;
+                originalClearGeneration = clearGeneration;
+                TranslatorModClient.clearComponentCache();
             }
-            lruCache.invalidateAll();
-            isDirty = false;
-            activeLanguage = lang;
-            ru.fridorin.translator.TranslatorModClient.clearComponentCache();
-            
-            String filename = "cache_" + lang + ".json";
-            cacheFile = FabricLoader.getInstance().getConfigDir().resolve("skyblock_translator/" + filename).toFile();
-            
-            if ("ru".equals(lang)) {
-                File legacyFile = FabricLoader.getInstance().getConfigDir().resolve("skyblock_translator/cache.json").toFile();
-                if (legacyFile.exists() && !cacheFile.exists()) {
-                    legacyFile.renameTo(cacheFile);
-                }
+            persist(previous);
+
+            Map<String, Entry> loaded = readCache(file, language);
+            synchronized (CACHE_LOCK) {
+                if (originalClearGeneration != clearGeneration) return;
+                var config = TranslatorConfigManager.getConfig();
+                loaded.forEach((key, entry) -> {
+                    if (entry.scope().mayPersist(config)) CACHE.asMap().putIfAbsent(key, entry);
+                    else dirty = true;
+                });
+                if (dirty) scheduleSaveLocked();
             }
-            
-            load();
         }
     }
 
-    public static void init() {
-        String lang = ru.fridorin.translator.config.TranslatorConfigManager.getConfig().targetLanguage;
-        loadForLanguage(lang);
-    }
-
-    public static String get(String text) {
+    public static String get(String text, TranslationScope scope) {
         if (text == null) return null;
-        String lower = text.trim().toLowerCase(java.util.Locale.ROOT);
-        synchronized (SCHEDULER_LOCK) {
-            if (!activeLanguage.equals(ru.fridorin.translator.config.TranslatorConfigManager.getConfig().targetLanguage)) return null;
-            return lruCache.getIfPresent(lower);
+        var config = TranslatorConfigManager.getConfig();
+        if (!scope.allowsOnline(config)) return null;
+        String key = cacheKey(text, config.apiProvider, scope);
+        synchronized (CACHE_LOCK) {
+            if (!activeLanguage.equals(config.targetLanguage)) return null;
+            Entry entry = CACHE.getIfPresent(key);
+            if (entry == null) return null;
+            if (entry.validAt(System.currentTimeMillis())) return entry.text();
+            CACHE.invalidate(key);
+            return null;
         }
     }
 
-    public static void put(String original, String translated) {
-        put(original, translated, ru.fridorin.translator.config.TranslatorConfigManager.getConfig().targetLanguage,
-                ru.fridorin.translator.TranslatorModClient.getCacheGeneration());
+    public static void put(String original, String translated, String language, long generation,
+                           String provider, TranslationScope scope) {
+        if (original == null || translated == null || language == null) return;
+        String value = translated.trim();
+        if (!validEntry(original.strip(), value, language)) return;
+        var config = TranslatorConfigManager.getConfig();
+        synchronized (CACHE_LOCK) {
+            if (!activeLanguage.equals(language) || !language.equals(config.targetLanguage)
+                    || !scope.allowsOnline(config)
+                    || generation != TranslatorModClient.getCacheGeneration()) return;
+            String key = cacheKey(original, provider, scope);
+            boolean persistable = scope.mayPersist(config);
+            CACHE.put(key, new Entry(value, provider, scope, System.currentTimeMillis() + TTL_MILLIS, persistable));
+            if (persistable) {
+                dirty = true;
+                scheduleSaveLocked();
+            }
+        }
     }
 
-    public static void put(String original, String translated, String language, long generation) {
-        if (original == null || translated == null) return;
-        String trimmedOrig = original.trim();
-        String trimmedTrans = translated.trim();
-        if (trimmedOrig.isEmpty() || trimmedTrans.isEmpty() || trimmedOrig.equalsIgnoreCase(trimmedTrans)) return;
-        
-        String targetLang = ru.fridorin.translator.config.TranslatorConfigManager.getConfig().targetLanguage;
-        if ("ru".equalsIgnoreCase(targetLang) && ru.fridorin.translator.service.SkyblockDictionary.isHybrid(trimmedTrans)) {
-            return;
-        }
-
-        synchronized (SCHEDULER_LOCK) {
-            if (!activeLanguage.equals(language)
-                    || !language.equals(ru.fridorin.translator.config.TranslatorConfigManager.getConfig().targetLanguage)
-                    || generation != ru.fridorin.translator.TranslatorModClient.getCacheGeneration()) return;
-            lruCache.put(trimmedOrig.toLowerCase(java.util.Locale.ROOT), trimmedTrans);
-            isDirty = true;
-        }
-        scheduleSave();
+    private static String cacheKey(String text, String provider, TranslationScope scope) {
+        return provider + ":" + scope.name() + ":" + text.strip().toLowerCase(Locale.ROOT);
     }
 
-    public static void load() {
-        if (cacheFile == null || !cacheFile.exists()) {
-            return;
+    public static void refreshPersistence() {
+        synchronized (CACHE_LOCK) {
+            var config = TranslatorConfigManager.getConfig();
+            if (config.persistChatCache || cacheFile == null) return;
+            boolean removed = CACHE.asMap().values().removeIf(entry -> entry.persistable() && !entry.scope().mayPersist(config));
+            if (removed) {
+                dirty = true;
+                scheduleSaveLocked();
+            }
         }
-        try (java.io.BufferedReader reader = java.nio.file.Files.newBufferedReader(cacheFile.toPath(), java.nio.charset.StandardCharsets.UTF_8)) {
-            Type type = new TypeToken<Map<String, String>>(){}.getType();
-            Map<String, String> loaded = GSON.fromJson(reader, type);
-            if (loaded != null) {
-                String targetLang = ru.fridorin.translator.config.TranslatorConfigManager.getConfig().targetLanguage;
-                boolean checkHybrid = "ru".equalsIgnoreCase(targetLang);
-                int count = 0;
-                for (Map.Entry<String, String> entry : loaded.entrySet()) {
-                    if (count >= MAX_SIZE) {
-                        isDirty = true;
-                        break;
+    }
+
+    private static boolean validEntry(String key, String value, String language) {
+        return !key.isEmpty() && !value.isEmpty() && key.length() <= MAX_CHARACTERS
+            && value.length() <= MAX_CHARACTERS && !key.equalsIgnoreCase(value)
+            && (!"ru".equals(language) || !SkyblockDictionary.isHybrid(value));
+    }
+
+    private static Map<String, Entry> readCache(Path file, String language) {
+        if (!Files.exists(file)) return Map.of();
+        Map<String, Entry> result = new LinkedHashMap<>();
+        long now = System.currentTimeMillis();
+        try {
+            Map<String, Entry> stored = GSON.fromJson(AtomicFiles.read(file, MAX_FILE_BYTES), ENTRIES_TYPE.getType());
+            if (stored != null) {
+                for (Map.Entry<String, Entry> pair : stored.entrySet()) {
+                    if (result.size() >= MAX_ENTRIES) break;
+                    String key = pair.getKey();
+                    Entry entry = pair.getValue();
+                    if (key == null || entry == null || entry.scope() == null || entry.provider() == null
+                            || entry.text() == null || !entry.persistable() || !entry.validAt(now)) continue;
+                    String prefix = entry.provider() + ":" + entry.scope().name() + ":";
+                    if (key.startsWith(prefix) && prefix.length() < 64
+                            && validEntry(key.substring(prefix.length()), entry.text(), language)) {
+                        result.put(key, entry);
                     }
-                    String key = entry.getKey();
-                    String val = entry.getValue();
-                    if (key == null || val == null) continue;
-                    if (checkHybrid && ru.fridorin.translator.service.SkyblockDictionary.isHybrid(val)) {
-                        isDirty = true;
-                        continue;
-                    }
-                    lruCache.put(key.toLowerCase(java.util.Locale.ROOT), val);
-                    count++;
                 }
             }
-        } catch (Exception e) {
-            LOGGER.error("Failed to load translation cache", e);
+        } catch (IOException | JsonParseException error) {
+            LOGGER.warn("Could not load the translation cache");
+        }
+        return result;
+    }
+
+    private record Snapshot(Path file, Map<String, Entry> entries) { }
+
+    private static Snapshot takeSnapshot() {
+        if (!dirty || cacheFile == null) {
+            dirty = false;
+            return null;
+        }
+        dirty = false;
+        Map<String, Entry> entries = new LinkedHashMap<>();
+        var config = TranslatorConfigManager.getConfig();
+        long now = System.currentTimeMillis();
+        CACHE.asMap().forEach((key, entry) -> {
+            if (entry.persistable() && entry.scope().mayPersist(config) && entry.validAt(now)) entries.put(key, entry);
+        });
+        return new Snapshot(cacheFile, entries);
+    }
+
+    private static boolean persist(Snapshot snapshot) {
+        if (snapshot == null) return true;
+        try {
+            AtomicFiles.write(snapshot.file(), GSON.toJson(snapshot.entries()), MAX_FILE_BYTES);
+            return true;
+        } catch (IOException error) {
+            LOGGER.warn("Could not save the translation cache");
+            return false;
         }
     }
 
     private static void save() {
-        synchronized (SCHEDULER_LOCK) {
-            saveLocked();
-        }
-    }
-
-    private static void saveLocked() {
-        if (!isDirty || cacheFile == null) return;
-        Map<String, String> snapshot = new java.util.LinkedHashMap<>(lruCache.asMap());
-        isDirty = false;
-        try {
-            File parent = cacheFile.getParentFile();
-            if (parent != null && !parent.exists()) {
-                parent.mkdirs();
+        synchronized (STORAGE_LOCK) {
+            Snapshot snapshot;
+            synchronized (CACHE_LOCK) {
+                pendingSaveTask = null;
+                snapshot = takeSnapshot();
             }
-            ru.fridorin.translator.util.AtomicFiles.write(cacheFile.toPath(), GSON.toJson(snapshot));
-        } catch (IOException e) {
-            isDirty = true;
-            LOGGER.error("Failed to save translation cache", e);
-        }
-    }
-
-    public static void scheduleSave() {
-        if (!isDirty || scheduler.isShutdown()) return;
-        synchronized (SCHEDULER_LOCK) {
-            if (scheduler.isShutdown()) return;
-            if (pendingSaveTask != null && !pendingSaveTask.isDone()) {
-                return;
-            }
-            pendingSaveTask = scheduler.schedule(() -> {
-                synchronized (SCHEDULER_LOCK) {
-                    pendingSaveTask = null;
-                    saveLocked();
+            if (!persist(snapshot)) {
+                synchronized (CACHE_LOCK) {
+                    dirty = true;
                 }
-            }, 5, TimeUnit.SECONDS);
+            }
         }
+    }
+
+    private static void scheduleSaveLocked() {
+        if (scheduler.isShutdown() || pendingSaveTask != null) return;
+        pendingSaveTask = scheduler.schedule(TranslationCache::save, 5, TimeUnit.SECONDS);
     }
 
     public static void shutdown() {
-        synchronized (SCHEDULER_LOCK) {
-            if (pendingSaveTask != null) {
-                pendingSaveTask.cancel(false);
-            }
+        synchronized (CACHE_LOCK) {
+            if (pendingSaveTask != null) pendingSaveTask.cancel(false);
+            scheduler.shutdown();
         }
         save();
-        scheduler.shutdown();
     }
 
     public static void clear() {
-        synchronized (SCHEDULER_LOCK) {
-            ru.fridorin.translator.TranslatorModClient.clearComponentCache();
-            lruCache.invalidateAll();
-            isDirty = true;
-            saveLocked();
+        synchronized (CACHE_LOCK) {
+            TranslatorModClient.clearComponentCache();
+            CACHE.invalidateAll();
+            clearGeneration++;
+            dirty = true;
+            scheduleSaveLocked();
         }
     }
 }

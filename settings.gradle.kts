@@ -2,7 +2,6 @@ pluginManagement {
     repositories {
         maven("https://maven.fabricmc.net/") { name = "Fabric" }
         maven("https://maven.kikugie.dev/releases") { name = "KikuGie Releases" }
-        maven("https://maven.kikugie.dev/snapshots") { name = "KikuGie Snapshots" }
         mavenCentral()
         gradlePluginPortal()
     }
@@ -10,7 +9,7 @@ pluginManagement {
 
 plugins {
     // Multi-version orchestration. Check latest at https://stonecutter.kikugie.dev/blog/changes
-    id("dev.kikugie.stonecutter") version "0.9.8"
+    id("dev.kikugie.stonecutter") version "0.10"
 
     // Bridges the Loom API differences between obfuscated (<26.1) and unobfuscated (26.1+) Minecraft
     // so a single build.gradle.kts works for every targeted version.

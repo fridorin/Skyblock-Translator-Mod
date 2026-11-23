@@ -6,6 +6,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 import argparse
 import json
@@ -45,6 +46,18 @@ def check_url(url):
         return url, None, str(error)
 
 
+def format_arguments(text):
+    implicit = 0
+    result = Counter()
+    for index, kind in re.findall(r"%(?:(\d+)\$)?([a-zA-Z%])", text):
+        if kind == "%":
+            continue
+        if not index:
+            implicit += 1
+        result[(int(index) if index else implicit, kind)] += 1
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--online", action="store_true")
@@ -80,7 +93,7 @@ def main():
         for example in re.findall(r"```json\s*\n(.*?)\n```", text, re.S):
             try:
                 json.loads(example, object_pairs_hook=unique_object)
-            except (ValueError, json.JSONDecodeError) as error:
+            except ValueError as error:
                 errors.append(f"{document.name}: invalid JSON example: {error}")
     resources = ROOT / "src/main/resources/assets/skyblock_translator"
     parsed_json = {}
@@ -100,10 +113,11 @@ def main():
         if set(localized) != set(base):
             errors.append(f"Localization keys differ: {locale}")
         for key in set(localized) & set(base):
-            if len(re.findall(r"%(?:\d+\$)?[sd]", localized[key])) != len(re.findall(r"%(?:\d+\$)?[sd]", base[key])):
-                errors.append(f"Localization argument count differs: {locale}/{key}")
+            if format_arguments(localized[key]) != format_arguments(base[key]):
+                errors.append(f"Localization argument positions or types differ: {locale}/{key}")
     sources = "\n".join(file.read_text(encoding="utf-8") for file in (ROOT / "src/main/java").rglob("*.java"))
     gui_keys = {"gui.skyblock_translator." + key for key in re.findall(r'translate\("([^"]+)"', sources)}
+    gui_keys.update(re.findall(r'translatable\("(gui\.skyblock_translator\.[^"]+)"(?=\s*[,\)])', sources))
     if gui_keys - set(base):
         errors.append(f"Missing GUI strings: {sorted(gui_keys - set(base))}")
     if args.online:

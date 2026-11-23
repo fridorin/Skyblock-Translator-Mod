@@ -3,18 +3,22 @@
 mod.id = "skyblock_translator"
 mod.name = "Skyblock Translator"
 mod.group = "ru.fridorin"
-mod.version = "1.2.2"
+mod.version = "1.3.0"
+mod.fabric_loader_min = "0.19.5"
 
-deps.fabric_loader = "0.19.5"
-loomx.loom_version = "1.17-SNAPSHOT"
+deps.fabric_loader = "0.20.1"
+deps.yacl_artifact = "dev.isxander:yet-another-config-lib"
+loomx.loom_version = "1.19.4"
 
 ["1.21.11"]
 mod.mc_compat = "~1.21.11"
 mod.mc_releases = ["1.21.11"]
 
-deps.fabric_api = "0.141.5+1.21.11"
-deps.modmenu = "17.0.0"
-deps.yacl = "3.8.1+1.21.11-fabric"
+deps.fabric_api = "0.141.6+1.21.11"
+deps.modmenu = "17.0.1"
+deps.yacl = "3.8.2+1.21.11-fabric"
+# This patch was published on Modrinth but is absent from the official Maven repository.
+deps.yacl_artifact = "maven.modrinth:yacl"
 
 ["26.1.2"]
 mod.mc_compat = "~26.1"
@@ -36,6 +40,6 @@ deps.yacl = "3.9.7+26.2-fabric"
 mod.mc_compat = "~26.3"
 mod.mc_releases = ["26.3"]
 
-deps.fabric_api = "0.161.0+26.3"
-deps.modmenu = "21.0.0"
+deps.fabric_api = "0.166.2+26.3"
+deps.modmenu = "21.0.1"
 deps.yacl = "3.9.7+26.3-fabric"

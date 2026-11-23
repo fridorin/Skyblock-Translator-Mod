@@ -31,6 +31,8 @@ bin/
 # fabric
 
 run/
+# Game profiles can use a custom run directory.
+**/config/skyblock_translator/
 
 # stonecutter
 

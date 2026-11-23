@@ -10,24 +10,27 @@ public class KeyBindCaptureScreen extends Screen {
     private final Screen parent;
     private final KeyMapping keyMapping;
 
-    public KeyBindCaptureScreen(Screen parent, KeyMapping keyMapping) {
-        super(Component.literal("Key Binding"));
+    private final java.util.function.Supplier<Screen> afterBinding;
+
+    public KeyBindCaptureScreen(Screen parent, KeyMapping keyMapping, java.util.function.Supplier<Screen> afterBinding) {
+        super(Component.translatable("gui.skyblock_translator.key_capture.title"));
         this.parent = parent;
         this.keyMapping = keyMapping;
+        this.afterBinding = afterBinding;
     }
 
     @Override
     //? if <26.1 {
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float delta) {
-        this.renderBackground(graphics, mouseX, mouseY, delta);
     //?} else {
     /*public void extractRenderState(GuiGraphics graphics, int mouseX, int mouseY, float delta) {
-        this.extractBackground(graphics, mouseX, mouseY, delta);
     *///?}
 
-        String mappingName = Component.translatable(keyMapping.getName()).getString();
-        graphics.drawCenteredString(this.font, "Press any key to bind to: " + mappingName, this.width / 2, this.height / 2 - 20, 0xFFFFFF);
-        graphics.drawCenteredString(this.font, "Press ESC to cancel", this.width / 2, this.height / 2 + 10, 0xAAAAAA);
+        Component prompt = Component.translatable("gui.skyblock_translator.key_capture.prompt",
+                Component.translatable(keyMapping.getName()));
+        Component cancel = Component.translatable("gui.skyblock_translator.key_capture.cancel");
+        graphics.drawCenteredString(this.font, prompt, this.width / 2, this.height / 2 - 20, 0xFFFFFFFF);
+        graphics.drawCenteredString(this.font, cancel, this.width / 2, this.height / 2 + 10, 0xFFAAAAAA);
 
         //? if <26.1 {
         super.render(graphics, mouseX, mouseY, delta);
@@ -43,22 +46,20 @@ public class KeyBindCaptureScreen extends Screen {
             return true;
         }
         
-        InputConstants.Key key = InputConstants.Type.KEYSYM.getOrCreate(keyCode);
-        this.keyMapping.setKey(key);
-        KeyMapping.resetMapping();
-        this.minecraft.options.save();
-        this.minecraft.setScreen(parent);
+        bind(InputConstants.getKey(event));
         return true;
     }
 
     @Override
     public boolean mouseClicked(net.minecraft.client.input.MouseButtonEvent event, boolean doubleClick) {
-        int button = event.button();
-        InputConstants.Key key = InputConstants.Type.MOUSE.getOrCreate(button);
+        bind(InputConstants.Type.MOUSE.getOrCreate(event.button()));
+        return true;
+    }
+
+    private void bind(InputConstants.Key key) {
         this.keyMapping.setKey(key);
         KeyMapping.resetMapping();
         this.minecraft.options.save();
-        this.minecraft.setScreen(parent);
-        return true;
+        this.minecraft.setScreen(afterBinding.get());
     }
 }

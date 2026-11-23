@@ -1,6 +1,6 @@
 plugins {
     id("dev.kikugie.stonecutter")
-    id("net.fabricmc.fabric-loom-remap") version "1.17-SNAPSHOT" apply false
+    id("net.fabricmc.fabric-loom-remap") version "1.19.4" apply false
 }
 
 // The version currently active for editing/running in the IDE.
@@ -42,7 +42,7 @@ stonecutter parameters {
         
         string(current.parsed >= "26.2") { replace("client.getToastManager()", "client.gui.toastManager()") }
 
-        // 26.3 (1.21.4) migrated from GLFW to SDL3: InputConstants.Type.KEYSYM renamed to KEYBOARD
+        // 26.3 migrated from GLFW to SDL3: InputConstants.Type.KEYSYM renamed to KEYBOARD.
         string(current.parsed >= "26.3") { replace("InputConstants.Type.KEYSYM", "InputConstants.Type.KEYBOARD") }
     }
 }

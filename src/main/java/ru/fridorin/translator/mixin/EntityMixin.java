@@ -4,6 +4,7 @@ import ru.fridorin.translator.config.TranslatorConfig;
 import ru.fridorin.translator.config.TranslatorConfigManager;
 import ru.fridorin.translator.service.TranslationService;
 import ru.fridorin.translator.TranslatorModClient;
+import ru.fridorin.translator.service.TranslationScope;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.Entity;
 import org.spongepowered.asm.mixin.Mixin;
@@ -16,14 +17,14 @@ public class EntityMixin {
     @Inject(method = "getDisplayName", at = @At("RETURN"), cancellable = true)
     private void onGetDisplayName(CallbackInfoReturnable<Component> cir) {
         Entity entity = (Entity) (Object) this;
+        if (TranslatorModClient.isTranslationDisabled()
+                || entity instanceof net.minecraft.world.entity.player.Player) return;
 
         Component original = cir.getReturnValue();
         if (original == null) return;
         String plainText = original.getString();
         if (plainText == null || plainText.trim().isEmpty()) return;
 
-        if (TranslatorModClient.isTranslationDisabled() || TranslationService.isBypassed()
-                || entity instanceof net.minecraft.world.entity.player.Player) return;
         TranslatorConfig config = TranslatorConfigManager.getConfig();
         if (config.ignoreDamageIndicators && TranslationService.isDamageIndicator(plainText)) return;
 
@@ -58,7 +59,7 @@ public class EntityMixin {
 
         if ((isMob && !config.translateMobNames) || (isNpc && !config.translateNpcNames)
                 || (isHologram && !config.translateHolograms)) return;
-        Component translated = TranslatorModClient.translateComponent(original);
+        Component translated = TranslatorModClient.translateComponent(original, isNpc ? TranslationScope.NPC : TranslationScope.WORLD);
         if (translated != original) cir.setReturnValue(translated);
     }
 }

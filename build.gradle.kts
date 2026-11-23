@@ -10,6 +10,7 @@ plugins {
 val modId: String = property("mod.id") as String
 val modName: String = property("mod.name") as String
 val modVersion: String = property("mod.version") as String
+val fabricLoaderMin: String = property("mod.fabric_loader_min") as String
 val mcCompat: String = sc.properties["mod.mc_compat"] as String
 
 version = "$modVersion+mc${sc.current.version}"
@@ -43,21 +44,29 @@ repositories {
 
 dependencies {
     testImplementation("junit:junit:4.13.2")
-    testImplementation("org.ow2.asm:asm-tree:9.10.1")
+    testImplementation("org.ow2.asm:asm-tree:9.11.1")
     // To change the versions see stonecutter.properties.toml
     minecraft("com.mojang:minecraft:${sc.current.version}")
     // Applies Mojang mappings on obfuscated versions; no-op on 26.1+ where Minecraft ships unobfuscated.
     loomx.applyMojangMappings()
     modImplementation("net.fabricmc:fabric-loader:${sc.properties["deps.fabric_loader"] as String}")
 
-    // Fabric API. This is technically optional, but you probably want it anyway.
+    // Fabric API is required at runtime.
     modImplementation("net.fabricmc.fabric-api:fabric-api:${sc.properties["deps.fabric_api"] as String}")
 
     // ModMenu API (compile only) — via Modrinth's maven mirror, see repositories { } above
     modCompileOnly("maven.modrinth:modmenu:${sc.properties["deps.modmenu"] as String}")
 
     // YetAnotherConfigLib (YACL) API
-    modImplementation("dev.isxander:yet-another-config-lib:${sc.properties["deps.yacl"] as String}")
+    val yaclArtifact = sc.properties["deps.yacl_artifact"] as String
+    val yaclVersion = sc.properties["deps.yacl"] as String
+    modImplementation("$yaclArtifact:$yaclVersion")
+    if (yaclArtifact == "maven.modrinth:yacl") {
+        // Modrinth's POM omits dependencies and Loom removes nested jars when remapping for development.
+        runtimeOnly("org.quiltmc.parsers:gson:0.2.1")
+        runtimeOnly("com.twelvemonkeys.imageio:imageio-webp:3.12.0")
+        runtimeOnly("org.jetbrains.kotlin:kotlin-stdlib:2.2.21")
+    }
 }
 
 java {
@@ -75,6 +84,7 @@ java {
 
 tasks {
     withType<JavaCompile>().configureEach {
+        options.encoding = "UTF-8"
         options.release = requiredJava.majorVersion.toInt()
     }
 
@@ -88,6 +98,7 @@ tasks {
             "version" to modVersion,
             "minecraft" to mcCompat,
             "java" to "${requiredJava.majorVersion}",
+            "fabric_loader_min" to fabricLoaderMin,
             "fabric_api" to fapiVersion,
             "yacl" to yaclVersion
         )

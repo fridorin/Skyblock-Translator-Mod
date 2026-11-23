@@ -4,6 +4,9 @@ import ru.fridorin.translator.cache.TranslationCache;
 import ru.fridorin.translator.config.TranslatorConfig;
 import ru.fridorin.translator.config.TranslatorConfigManager;
 import ru.fridorin.translator.service.TranslationService;
+import ru.fridorin.translator.service.TranslationScope;
+import ru.fridorin.translator.gui.OutgoingDraftScreen;
+import net.minecraft.client.gui.screens.Screen;
 import ru.fridorin.translator.service.SkyblockDictionary;
 import ru.fridorin.translator.service.SpamFilter;
 import net.fabricmc.api.ClientModInitializer;
@@ -13,10 +16,13 @@ import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallba
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.minecraft.client.KeyMapping;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.Style;
@@ -26,33 +32,35 @@ import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 public class TranslatorModClient implements ClientModInitializer {
     private static final Logger LOGGER = LoggerFactory.getLogger(TranslatorModClient.class);
-
-    private static final java.util.concurrent.ScheduledExecutorService watchdogScheduler = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
-        Thread t = new Thread(r, "SkyblockTranslator-Watchdog");
-        t.setDaemon(true);
-        return t;
-    });
+    private static final ThreadPoolExecutor DICTIONARY_LOADER = new ThreadPoolExecutor(
+            1, 1, 0, TimeUnit.SECONDS, new ArrayBlockingQueue<>(1), runnable -> {
+                Thread thread = new Thread(runnable, "SkyblockTranslator-DictionaryLoader");
+                thread.setDaemon(true);
+                return thread;
+            }, new ThreadPoolExecutor.DiscardOldestPolicy());
 
     // Fast, simple line-level cache to replace the complex tooltip cache
     private static final com.google.common.cache.Cache<String, Component> COMPONENT_CACHE = com.google.common.cache.CacheBuilder.newBuilder()
         .maximumSize(2000)
+        .expireAfterWrite(5, TimeUnit.MINUTES)
         .build();
-    private static final com.google.common.cache.Cache<String, Boolean> PENDING_COMPONENTS = com.google.common.cache.CacheBuilder.newBuilder()
+    private static final com.google.common.cache.Cache<String, Object> PENDING_COMPONENTS = com.google.common.cache.CacheBuilder.newBuilder()
         .maximumSize(2000)
         .expireAfterWrite(10, TimeUnit.SECONDS)
         .build();
 
     private static final com.google.common.cache.Cache<String, Boolean> UNTRANSLATED_COMPONENTS = com.google.common.cache.CacheBuilder.newBuilder()
         .maximumSize(2000).expireAfterWrite(1, TimeUnit.SECONDS).build();
-    private static CompletableFuture<Void> outgoingQueue = CompletableFuture.completedFuture(null);
+    private static OutgoingChatDraft outgoingDraft = new OutgoingChatDraft();
+    private static ClientPacketListener chatConnection;
+    private static ClientLevel chatLevel;
 
     // Precompiled regex for detecting public chat messages with any Hypixel rank (e.g. [VIP+], [MVP++], [HELPER])
     private static final Pattern PUBLIC_CHAT_PATTERN = Pattern.compile("^(?:\\[[A-Za-z0-9+ ]+\\] )?\\w+: .*");
@@ -70,39 +78,24 @@ public class TranslatorModClient implements ClientModInitializer {
 
     private static KeyMapping keyOpenSettings;
     private static KeyMapping keyToggleTranslator;
-    public static volatile boolean bypassTranslation = false;
     private static int ticksElapsed = 0;
-    private static volatile boolean initialized = false;
+    private static volatile long requestedDictionaryRevision;
+    private static volatile long loadedDictionaryRevision = -1;
+    private static volatile long failedDictionaryRevision = -1;
 
     public static KeyMapping getKeyOpenSettings() { return keyOpenSettings; }
     public static KeyMapping getKeyToggleTranslator() { return keyToggleTranslator; }
 
     @Override
     public void onInitializeClient() {
-        // 1. FAST INIT: Load only config synchronously (it's small and essential)
         TranslatorConfigManager.init();
-
-        // 2. ASYNC INIT: Move all heavy I/O and dictionary processing to a background thread
-        TranslationService.TRANSLATION_EXECUTOR.execute(() -> {
-            try {
-                TranslationCache.init();
-                SkyblockDictionary.loadForLanguage(TranslatorConfigManager.getConfig().targetLanguage);
-                SkyblockDictionary.loadUserDictionary();
-                initialized = true;
-            } catch (Exception e) {
-                LOGGER.error("Failed to initialize dictionaries", e);
-            }
-        });
+        reloadTranslations();
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            DICTIONARY_LOADER.shutdownNow();
             clearComponentCache();
             TranslationService.shutdown();
             TranslationCache.shutdown();
-            try {
-                watchdogScheduler.shutdown();
-            } catch (Exception e) {
-                LOGGER.warn("Failed to shutdown watchdog scheduler", e);
-            }
         }));
 
         net.minecraft.client.KeyMapping.Category category = net.minecraft.client.KeyMapping.Category.register(
@@ -116,16 +109,18 @@ public class TranslatorModClient implements ClientModInitializer {
             category
         ));
 
-        keyToggleTranslator = KeyBindingHelper.registerKeyBinding(new KeyMapping(
-            "key.skyblock_translator.toggle",
-            InputConstants.Type.KEYSYM,
-            -1,
-            category
-        ));
+        keyToggleTranslator = KeyBindingHelper.registerKeyBinding(createToggleKey(category));
+        ClientLifecycleEvents.CLIENT_STARTED.register(client -> {
+            if (repairLegacyToggleKey(keyToggleTranslator)) {
+                KeyMapping.resetMapping();
+                client.options.save();
+            }
+        });
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            ticksElapsed++;
-            if (ticksElapsed % 100 == 0 || TranslationService.getOnlinePlayerNames().isEmpty()) {
+            updateChatSession(client);
+            if (++ticksElapsed >= 100) {
+                ticksElapsed = 0;
                 TranslationService.updateOnlinePlayerNames(client);
             }
 
@@ -146,37 +141,36 @@ public class TranslatorModClient implements ClientModInitializer {
         });
 
         ClientReceiveMessageEvents.ALLOW_CHAT.register((message, signedMessage, sender, params, receptionTimestamp) -> {
-            if (!initialized || isTranslationDisabled() || !TranslatorConfigManager.getConfig().translateChat) return true;
+            if (isTranslationDisabled() || !TranslatorConfigManager.getConfig().translateChat) return true;
             return handleIncomingChatEvent(message);
         });
 
         ClientReceiveMessageEvents.ALLOW_GAME.register((message, overlay) -> {
             if (overlay) return true;
-            if (!initialized || isTranslationDisabled() || !TranslatorConfigManager.getConfig().translateChat) return true;
+            if (isTranslationDisabled() || !TranslatorConfigManager.getConfig().translateChat) return true;
             return handleIncomingChatEvent(message);
         });
 
         ClientSendMessageEvents.ALLOW_CHAT.register(message -> {
-            if (TranslationService.isBypassed() || isTranslationDisabled() || !TranslatorConfigManager.getConfig().translateOutgoingChat) return true;
-
-            if (message.startsWith("/")) {
-                return true;
-            }
-
-            if (!TranslationService.containsNonEnglishLetters(message)) return true;
+            if (TranslationService.isBypassed() || message.startsWith("/")) return true;
 
             Minecraft client = Minecraft.getInstance();
+            updateChatSession(client);
             var connection = client.getConnection();
-            outgoingQueue = outgoingQueue.handle((ignored, error) -> null)
-                    .thenCompose(ignored -> client.getConnection() == connection
-                            ? TranslationService.translateOutgoingAsync(message) : CompletableFuture.completedFuture(message))
-                    .handle((translated, error) -> error == null && translated != null && !translated.isBlank() ? translated : message)
-                    .thenAcceptAsync(toSend -> {
-                        if (connection != null && client.getConnection() == connection) {
-                            TranslationService.runWithBypass(() -> connection.sendChat(toSend));
-                        }
-                    }, client::execute);
+            if (connection == null) return true;
+            if (!outgoingTranslationEnabled() || !TranslationService.containsNonEnglishLetters(message)) return true;
 
+            var draft = outgoingDraft;
+            if (!draft.begin(message)) {
+                showDraftNotice(client, "busy");
+            } else {
+                TranslationService.translateOutgoingAsync(message).whenComplete((result, error) -> client.schedule(() -> {
+                    if (client.getConnection() != connection || draft != outgoingDraft) return;
+                    draft.complete(error == null ? result : null);
+                    if (currentScreen(client) == null) openOutgoingDraft(client);
+                    else showDraftNotice(client, "ready");
+                }));
+            }
             return false;
         });
 
@@ -248,8 +242,7 @@ public class TranslatorModClient implements ClientModInitializer {
                             TranslatorConfig config = TranslatorConfigManager.getConfig();
                             config.targetLanguage = lang;
                             TranslatorConfigManager.save();
-                            TranslationCache.loadForLanguage(lang);
-                            SkyblockDictionary.loadForLanguage(lang);
+                            reloadTranslations();
                             context.getSource().sendFeedback(Component.literal("§a[SkyBlock Translator] Target language set to: " + lang));
                             return 1;
                         }))
@@ -280,11 +273,8 @@ public class TranslatorModClient implements ClientModInitializer {
                 .then(ClientCommandManager.literal("reload")
                     .executes(context -> {
                         TranslatorConfigManager.load();
-                        TranslationCache.loadForLanguage(TranslatorConfigManager.getConfig().targetLanguage);
-                        SkyblockDictionary.loadForLanguage(TranslatorConfigManager.getConfig().targetLanguage);
-                        SkyblockDictionary.loadUserDictionary();
-                        clearComponentCache();
-                        context.getSource().sendFeedback(Component.literal("§a[SkyBlock Translator] Configuration and user dictionary reloaded."));
+                        reloadTranslations();
+                        context.getSource().sendFeedback(Component.literal("§a[SkyBlock Translator] Dictionary and cache reload requested."));
                         return 1;
                     })
                 )
@@ -303,7 +293,11 @@ public class TranslatorModClient implements ClientModInitializer {
                                 context.getSource().sendFeedback(Component.literal("§c[SkyBlock Translator] Phrase and translation cannot be empty!"));
                                 return 1;
                             }
-                            SkyblockDictionary.addUserTranslation(english, translation);
+                            if (!SkyblockDictionary.addUserTranslation(english, translation)) {
+                                context.getSource().sendFeedback(Component.translatable("gui.skyblock_translator.dictionary.save_failed")
+                                        .withStyle(ChatFormatting.RED));
+                                return 0;
+                            }
                             context.getSource().sendFeedback(Component.literal("§a[SkyBlock Translator] Added translation mapping: '" + english + "' -> '" + translation + "'"));
                             return 1;
                         })
@@ -336,17 +330,10 @@ public class TranslatorModClient implements ClientModInitializer {
                             return 1;
                         }
                         
-                        bypassTranslation = true;
-                        java.util.List<Component> rawLines;
-                        try {
-                            rawLines = itemInHand.getTooltipLines(
+                        var rawLines = TranslationService.callWithBypass(() -> itemInHand.getTooltipLines(
                                 net.minecraft.world.item.Item.TooltipContext.of(client.level),
                                 client.player,
-                                net.minecraft.world.item.TooltipFlag.Default.NORMAL
-                            );
-                        } finally {
-                            bypassTranslation = false;
-                        }
+                                net.minecraft.world.item.TooltipFlag.Default.NORMAL));
 
                         if (rawLines == null || rawLines.isEmpty()) {
                             context.getSource().sendFeedback(Component.literal("§c[SkyBlock Translator] No tooltip lines found on this item!"));
@@ -356,7 +343,7 @@ public class TranslatorModClient implements ClientModInitializer {
                         java.util.Map<String, String> template = new java.util.LinkedHashMap<>();
                         for (Component line : rawLines) {
                             String plain = line.getString();
-                            String clean = plain.replaceAll("§x(?:§[0-9a-fA-F]){6}|§.", "").trim();
+                            String clean = TranslationService.stripFormatting(plain).trim();
                             if (!clean.isEmpty()) {
                                 template.put(clean.toLowerCase(java.util.Locale.ROOT), "");
                             }
@@ -384,26 +371,37 @@ public class TranslatorModClient implements ClientModInitializer {
                         return 1;
                     })
                 )
-                .then(ClientCommandManager.literal("test")
-                    .executes(context -> {
-                        TranslatorConfig config = TranslatorConfigManager.getConfig();
-                        context.getSource().sendFeedback(Component.literal("§a[SkyBlock Translator] Testing connection to " + config.apiProvider + "..."));
-                        long start = System.currentTimeMillis();
-                        TranslationService.testConnectionAsync().thenAccept(translated -> {
-                            long duration = System.currentTimeMillis() - start;
-                            Minecraft client = Minecraft.getInstance();
-                            client.execute(() -> {
-                                if (translated == null || translated.trim().isEmpty() || translated.startsWith("[") || translated.equalsIgnoreCase("Hello")) {
-                                    context.getSource().sendFeedback(Component.literal("§c[SkyBlock Translator] Test failed! Check your API Key or connection. Response: " + translated));
-                                } else {
-                                    context.getSource().sendFeedback(Component.literal("§a[SkyBlock Translator] Connection successful! (" + duration + "ms)"));
-                                    context.getSource().sendFeedback(Component.literal("§7Test Translation: \"Hello\" ➔ \"" + translated + "\""));
-                                }
-                            });
-                        });
-                        return 1;
-                    })
-                )
+                .then(ClientCommandManager.literal("status").executes(context -> {
+                    TranslatorConfig config = TranslatorConfigManager.getConfig();
+                    long revision = requestedDictionaryRevision;
+                    boolean loaded = loadedDictionaryRevision == revision;
+                    String dictionaryState = "loading";
+                    if (loaded) dictionaryState = "loaded";
+                    else if (failedDictionaryRevision == revision) dictionaryState = "failed";
+                    context.getSource().sendFeedback(Component.translatable("gui.skyblock_translator.status",
+                            config.targetLanguage, config.apiProvider,
+                            Component.translatable(config.localOnly ? "gui.skyblock_translator.mode.local" : "gui.skyblock_translator.mode.online"),
+                            loaded ? SkyblockDictionary.entryCount() : 0,
+                            Component.translatable("gui.skyblock_translator.status." + dictionaryState),
+                            TranslationService.pendingRequests(), outgoingDraft.pendingCount(), TranslationService.failureLabel(TranslationService.lastError())));
+                    return 1;
+                }))
+                .then(ClientCommandManager.literal("draft").executes(context -> {
+                    Minecraft client = Minecraft.getInstance();
+                    client.schedule(() -> {
+                        if (!openOutgoingDraft(client)) showDraftNotice(client, "empty");
+                    });
+                    return 1;
+                }))
+                .then(ClientCommandManager.literal("test").executes(context -> {
+                    TranslatorConfig config = TranslatorConfigManager.getConfig();
+                    String provider = config.apiProvider;
+                    Minecraft client = Minecraft.getInstance();
+                    TranslationService.testConnectionAsync(provider, config.keyFor(provider), config.localOnly)
+                            .thenAccept(result -> client.schedule(() -> context.getSource().sendFeedback(
+                                    Component.translatable("gui.skyblock_translator.provider.result", provider, TranslationService.failureLabel(result)))));
+                    return 1;
+                }))
                 .executes(context -> {
                     Minecraft client = Minecraft.getInstance();
                     client.execute(() -> {
@@ -470,15 +468,78 @@ public class TranslatorModClient implements ClientModInitializer {
         return sb.toString();
     }
 
-    public static TextColor getFirstColor(Component component) {
-        if (component == null) return null;
-        TextColor color = component.getStyle().getColor();
-        if (color != null) return color;
-        for (Component sibling : component.getSiblings()) {
-            TextColor siblingColor = getFirstColor(sibling);
-            if (siblingColor != null) return siblingColor;
-        }
-        return null;
+    private static void updateChatSession(Minecraft client) {
+        var connection = client.getConnection();
+        if (chatConnection == connection && chatLevel == client.level) return;
+        if (chatConnection != connection) outgoingDraft = new OutgoingChatDraft();
+        chatConnection = connection;
+        chatLevel = client.level;
+        ticksElapsed = 0;
+        clearComponentCache();
+        TranslationService.updateOnlinePlayerNames(client);
+    }
+
+    private static boolean outgoingTranslationEnabled() {
+        TranslatorConfig config = TranslatorConfigManager.getConfig();
+        return !isTranslationDisabled() && config.translateOutgoingChat && TranslationScope.OUTGOING.allowsOnline(config);
+    }
+
+    public static Screen currentScreen(Minecraft client) {
+        //? if <26.2 {
+        return client.screen;
+        //?} else
+        /*return client.gui.screen();*/
+    }
+
+    private static boolean openOutgoingDraft(Minecraft client) {
+        updateChatSession(client);
+        var connection = client.getConnection();
+        var draft = outgoingDraft;
+        if (connection == null || draft.text() == null) return false;
+        client.setScreen(new OutgoingDraftScreen(currentScreen(client), draft.text(), toSend -> {
+            if (client.getConnection() != connection || draft != outgoingDraft) return false;
+            return draft.use(toSend, message -> TranslationService.runWithBypass(() -> connection.sendChat(message)));
+        }, OutgoingChatDraft::isValidChat, draft::edit, draft::discard));
+        return true;
+    }
+
+    private static void showDraftNotice(Minecraft client, String suffix) {
+        if (client.player == null) return;
+        Component message = Component.translatable("gui.skyblock_translator.draft." + suffix);
+        //? if <26.1 {
+        client.player.displayClientMessage(message, false);
+        //?} else
+        /*client.player.sendSystemMessage(message);*/
+    }
+
+    static KeyMapping createToggleKey(KeyMapping.Category category) {
+        return new KeyMapping("key.skyblock_translator.toggle", InputConstants.Type.KEYSYM,
+                InputConstants.UNKNOWN.getValue(), category);
+    }
+
+    static boolean repairLegacyToggleKey(KeyMapping mapping) {
+        // 26.3 can read the old GLFW value but cannot poll its negative SDL scancode.
+        if (!"key.keyboard.-1".equals(mapping.saveString())) return false;
+        mapping.setKey(InputConstants.UNKNOWN);
+        return true;
+    }
+
+    /** Called by the client thread after loading config or selecting a target language. */
+    public static void reloadTranslations() {
+        String language = TranslatorConfigManager.getConfig().targetLanguage;
+        long revision = ++requestedDictionaryRevision;
+        clearComponentCache();
+        DICTIONARY_LOADER.execute(() -> {
+            try {
+                SkyblockDictionary.loadForLanguage(language);
+                SkyblockDictionary.loadUserDictionary();
+                TranslationCache.loadForLanguage(language);
+                loadedDictionaryRevision = revision;
+            } catch (Exception e) {
+                failedDictionaryRevision = revision;
+                LOGGER.error("Failed to load dictionaries and cache", e);
+            }
+        });
     }
 
     public static Component legacyToComponent(String text) {
@@ -562,14 +623,23 @@ public class TranslatorModClient implements ClientModInitializer {
     }
 
     public static Component translateComponent(Component component) {
-        return translateComponentWithIgnore(component, null);
+        return translateComponent(component, TranslationScope.WORLD);
+    }
+
+    public static Component translateComponent(Component component, TranslationScope scope) {
+        return translateComponentWithIgnore(component, null, scope);
     }
 
     public static Component translateComponentWithIgnore(Component component, String ignoreText) {
-        if (component == null) return component;
-        if (isTranslationDisabled() || TranslationService.isBypassed() || bypassTranslation) {
-            return component;
-        }
+        return translateComponentWithIgnore(component, ignoreText, TranslationScope.WORLD);
+    }
+
+    private static Component translateComponentWithIgnore(Component component, String ignoreText, TranslationScope scope) {
+        if (component == null || isTranslationDisabled()) return component;
+        String plain = component.getString().strip();
+        if (!isTranslatable(plain) || plain.equalsIgnoreCase(ignoreText)) return component;
+        Style interactions = ChatPresentation.commonInteractions(component);
+        if (interactions == null) return component;
 
         String legacyText = componentToLegacy(component);
         if (legacyText.isEmpty()) {
@@ -586,24 +656,13 @@ public class TranslatorModClient implements ClientModInitializer {
         }
         String trimmed = legacyText.trim();
 
-        if (trimmed.isEmpty() || TranslationService.containsNonEnglishLetters(trimmed) || !TranslationService.containsLetters(trimmed)) {
-            return component;
-        }
-
-        if (ignoreText != null && !ignoreText.trim().isEmpty()) {
-            String cleanIgnore = ignoreText.trim();
-            if (trimmed.equalsIgnoreCase(cleanIgnore) || trimmed.replaceAll("§x(?:§[0-9a-fA-F]){6}|§.", "").trim().equalsIgnoreCase(cleanIgnore)) {
-                return component;
-            }
-        }
-
         final long generation = getCacheGeneration();
-        final String cacheKey = generation + ":" + legacyText;
+        final String cacheKey = generation + ":" + scope + ":" + legacyText;
         Component cached = COMPONENT_CACHE.getIfPresent(cacheKey);
-        if (cached != null) return cached;
+        if (cached != null) return preserveInteractions(cached, interactions);
         if (UNTRANSLATED_COMPONENTS.getIfPresent(cacheKey) != null || PENDING_COMPONENTS.getIfPresent(cacheKey) != null) return component;
 
-        String immediate = TranslationService.getImmediateTranslation(trimmed);
+        String immediate = TranslationService.getImmediateTranslation(trimmed, scope);
         if (immediate != null) {
             if (TranslationService.isTranslationSame(trimmed, immediate)) {
                 UNTRANSLATED_COMPONENTS.put(cacheKey, true);
@@ -612,27 +671,29 @@ public class TranslatorModClient implements ClientModInitializer {
             String restored = " ".repeat(leadingSpaces) + immediate + " ".repeat(trailingSpaces);
             Component translatedComponent = legacyToComponent(restored);
             COMPONENT_CACHE.put(cacheKey, translatedComponent);
-            return translatedComponent;
+            return preserveInteractions(translatedComponent, interactions);
         }
 
         final int finalLeadingSpaces = leadingSpaces;
         final int finalTrailingSpaces = trailingSpaces;
 
-        if (PENDING_COMPONENTS.asMap().putIfAbsent(cacheKey, true) != null) return component;
-        TranslationService.translateAsync(trimmed).thenAccept(translatedLegacy -> {
+        Object pending = new Object();
+        if (PENDING_COMPONENTS.asMap().putIfAbsent(cacheKey, pending) != null) return component;
+        TranslationService.translateAsync(trimmed, scope).thenAccept(translatedLegacy -> {
+            if (generation != getCacheGeneration()) return;
             if (translatedLegacy != null && !translatedLegacy.trim().isEmpty() && !translatedLegacy.equals(trimmed)) {
                 String restored = " ".repeat(finalLeadingSpaces) + translatedLegacy + " ".repeat(finalTrailingSpaces);
-                if (generation == getCacheGeneration()) COMPONENT_CACHE.put(cacheKey, legacyToComponent(restored));
+                COMPONENT_CACHE.put(cacheKey, legacyToComponent(restored));
             } else {
                 UNTRANSLATED_COMPONENTS.put(cacheKey, true);
             }
-        }).whenComplete((result, error) -> PENDING_COMPONENTS.invalidate(cacheKey));
+        }).whenComplete((result, error) -> PENDING_COMPONENTS.asMap().remove(cacheKey, pending));
         
         return component;
     }
 
-    public static CompletableFuture<Component> translateComponentAsync(Component component) {
-        if (component == null || isTranslationDisabled()) {
+    private static CompletableFuture<Component> translateComponentAsync(Component component, TranslationScope scope) {
+        if (component == null || isTranslationDisabled() || !isTranslatable(component.getString())) {
             return CompletableFuture.completedFuture(component);
         }
 
@@ -651,16 +712,12 @@ public class TranslatorModClient implements ClientModInitializer {
         }
         String trimmed = legacyText.trim();
 
-        if (trimmed.isEmpty() || TranslationService.containsNonEnglishLetters(trimmed) || !TranslationService.containsLetters(trimmed)) {
-            return CompletableFuture.completedFuture(component);
-        }
-
         final long generation = getCacheGeneration();
-        final String cacheKey = generation + ":" + legacyText;
+        final String cacheKey = generation + ":" + scope + ":" + legacyText;
         Component cached = COMPONENT_CACHE.getIfPresent(cacheKey);
         if (cached != null) return CompletableFuture.completedFuture(cached);
 
-        String immediate = TranslationService.getImmediateTranslation(trimmed);
+        String immediate = TranslationService.getImmediateTranslation(trimmed, scope);
         if (immediate != null) {
             String restored = " ".repeat(leadingSpaces) + immediate + " ".repeat(trailingSpaces);
             return CompletableFuture.completedFuture(legacyToComponent(restored));
@@ -669,7 +726,7 @@ public class TranslatorModClient implements ClientModInitializer {
         final int finalLeadingSpaces = leadingSpaces;
         final int finalTrailingSpaces = trailingSpaces;
 
-        return TranslationService.translateAsync(trimmed).thenApply(translatedLegacy -> {
+        return TranslationService.translateAsync(trimmed, scope).thenApply(translatedLegacy -> {
             if (translatedLegacy == null || translatedLegacy.trim().isEmpty() || translatedLegacy.equals(trimmed)) {
                 return component;
             }
@@ -678,8 +735,15 @@ public class TranslatorModClient implements ClientModInitializer {
         });
     }
 
+    private static boolean isTranslatable(String text) {
+        return TranslationService.containsLetters(text) && !TranslationService.containsNonEnglishLetters(text);
+    }
+
+    private static Component preserveInteractions(Component translated, Style interactions) {
+        return interactions.isEmpty() ? translated : Component.empty().setStyle(interactions).append(translated);
+    }
+
     private boolean handleIncomingChatEvent(Component message) {
-        if (!initialized) return true;
         String rawText = message.getString();
         if (rawText == null || rawText.trim().isEmpty()) return true;
 
@@ -692,10 +756,8 @@ public class TranslatorModClient implements ClientModInitializer {
 
         TranslatorConfig config = TranslatorConfigManager.getConfig();
 
-        int rawColonIndex = rawText.indexOf(": ");
-        
         boolean shouldTranslate = true;
-        String cleanText = rawText.replaceAll("§x(?:§[0-9a-fA-F]){6}|§.", "").trim();
+        String cleanText = TranslationService.stripFormatting(rawText).trim();
         
         if (cleanText.startsWith("Guild >") || cleanText.startsWith("G >") || cleanText.startsWith("Officer >") || cleanText.startsWith("O >")) {
             shouldTranslate = config.translateGuildChat;
@@ -718,69 +780,22 @@ public class TranslatorModClient implements ClientModInitializer {
         }
 
         Minecraft chatClient = Minecraft.getInstance();
-        var chatConnection = chatClient.getConnection();
+        updateChatSession(chatClient);
+        var connection = chatClient.getConnection();
+        var level = chatClient.level;
         long chatGeneration = getCacheGeneration();
-        translateComponentAsync(message).thenAccept(translated -> {
-            if (translated == null) {
-                return;
-            }
-            String originalRaw = message.getString();
-            String translatedRaw = translated.getString();
-            if (TranslationService.isTranslationSame(originalRaw, translatedRaw)) {
-                return;
-            }
+        translateComponentAsync(message, cleanText.startsWith("[NPC]") ? TranslationScope.NPC : TranslationScope.CHAT).thenAccept(translated -> {
+            if (translated == message || translated == null
+                    || TranslationService.isTranslationSame(rawText, translated.getString())) return;
 
-            Component finalMessage;
-            if ("REPLACE".equalsIgnoreCase(config.chatDisplayMode)) {
-                finalMessage = translated;
-            } else if ("INLINE".equalsIgnoreCase(config.chatDisplayMode)) {
-                MutableComponent combined = message.copy();
-                combined.append(Component.literal(" §7("));
-                combined.append(translated);
-                combined.append(Component.literal("§7)"));
-                finalMessage = combined;
-            } else if ("SEPARATE_LINE".equalsIgnoreCase(config.chatDisplayMode)) {
-                TextColor firstColor = getFirstColor(message);
-                MutableComponent prefix = Component.literal("\n↳ [" + config.targetLanguage.toUpperCase(java.util.Locale.ROOT) + "] ");
-                if (firstColor != null) {
-                    prefix.setStyle(Style.EMPTY.withColor(firstColor));
-                } else {
-                    prefix.setStyle(Style.EMPTY.withColor(TextColor.fromLegacyFormat(ChatFormatting.GRAY)));
-                }
-                Component translationLine = Component.empty().append(prefix).append(translated);
-                if (config.showHoverOriginal) {
-                    net.minecraft.network.chat.HoverEvent hoverEvent = new net.minecraft.network.chat.HoverEvent.ShowText(
-                        Component.literal("§7Original: §f").append(message.copy())
-                    );
-                    translationLine = translationLine.copy().setStyle(translationLine.getStyle().withHoverEvent(hoverEvent));
-                }
-                finalMessage = message.copy().append(translationLine);
-            } else {
-                TextColor firstColor = getFirstColor(message);
-                MutableComponent prefix = Component.literal("↳ [" + config.targetLanguage.toUpperCase(java.util.Locale.ROOT) + "] ");
-                if (firstColor != null) {
-                    prefix.setStyle(Style.EMPTY.withColor(firstColor));
-                } else {
-                    prefix.setStyle(Style.EMPTY.withColor(TextColor.fromLegacyFormat(ChatFormatting.GRAY)));
-                }
-                MutableComponent combined = message.copy();
-                combined.append(Component.literal("\n ").append(prefix).append("§7§o"));
-                combined.append(translated);
-                finalMessage = combined;
-            }
-
-            if (config.showHoverOriginal && finalMessage != message && !"SEPARATE_LINE".equalsIgnoreCase(config.chatDisplayMode)) {
-                net.minecraft.network.chat.HoverEvent hoverEvent = new net.minecraft.network.chat.HoverEvent.ShowText(
-                    Component.literal("§7Original: §f").append(message.copy())
-                );
-                finalMessage = finalMessage.copy().setStyle(finalMessage.getStyle().withHoverEvent(hoverEvent));
-            }
-
-            final Component finalMsg = finalMessage;
-            Minecraft.getInstance().execute(() -> {
-                if (chatClient.getConnection() != chatConnection || chatGeneration != getCacheGeneration()) return;
-                if (Minecraft.getInstance().gui != null && Minecraft.getInstance().gui.getChat() instanceof ru.fridorin.translator.ChatUpdateExtension) {
-                    ((ru.fridorin.translator.ChatUpdateExtension) Minecraft.getInstance().gui.getChat()).skyblock_translator$updateMessage(message, finalMsg);
+            // Immediate dictionary matches still have to wait for vanilla to insert the original.
+            chatClient.schedule(() -> {
+                if (chatClient.getConnection() != connection || chatClient.level != level
+                        || chatGeneration != getCacheGeneration() || !config.enabled || !config.translateChat) return;
+                if (chatClient.gui != null && chatClient.gui.getChat() instanceof ChatUpdateExtension chat) {
+                    Component displayed = ChatPresentation.format(message, translated, config.chatDisplayMode,
+                            config.targetLanguage, config.showHoverOriginal);
+                    chat.skyblock_translator$updateMessage(message, displayed);
                 }
             });
         });
@@ -798,7 +813,8 @@ public class TranslatorModClient implements ClientModInitializer {
 
     public static boolean isTranslationDisabled() {
         TranslatorConfig config = TranslatorConfigManager.getConfig();
-        if (!initialized || !config.enabled || TranslationService.isBypassed() || bypassTranslation
+        if (loadedDictionaryRevision != requestedDictionaryRevision || !config.enabled
+                || TranslationService.isBypassed()
                 || "en".equalsIgnoreCase(config.targetLanguage)) return true;
         Minecraft client = Minecraft.getInstance();
         if (client == null || !client.isSameThread()) return true;

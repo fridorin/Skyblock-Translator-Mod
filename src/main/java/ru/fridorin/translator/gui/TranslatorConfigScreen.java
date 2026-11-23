@@ -3,23 +3,36 @@ package ru.fridorin.translator.gui;
 import ru.fridorin.translator.config.TranslatorConfig;
 import ru.fridorin.translator.config.TranslatorConfigManager;
 import ru.fridorin.translator.cache.TranslationCache;
-import ru.fridorin.translator.service.SkyblockDictionary;
 import ru.fridorin.translator.TranslatorModClient;
+import ru.fridorin.translator.service.SkyblockDictionary;
+import ru.fridorin.translator.service.TranslationService;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.AlertScreen;
+import net.minecraft.client.gui.screens.ConfirmScreen;
+import dev.isxander.yacl3.api.controller.DropdownStringControllerBuilder;
+
+import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 import dev.isxander.yacl3.api.*;
 import dev.isxander.yacl3.api.controller.TickBoxControllerBuilder;
-import dev.isxander.yacl3.api.controller.StringControllerBuilder;
 import dev.isxander.yacl3.api.controller.CyclingListControllerBuilder;
+import dev.isxander.yacl3.gui.controllers.string.IStringController;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.ConfirmLinkScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.client.KeyMapping;
 
 import java.util.List;
+import java.net.URI;
 
 public class TranslatorConfigScreen {
-    private static boolean showApiKey = false;
+    private static final String MASKED_API_KEY = "••••••••";
+    private static final URI ISSUES_PAGE = URI.create("https://github.com/fridorin/Skyblock-Translator-Mod/issues");
 
     private static final java.util.Map<String, String> LANGUAGE_MAP = new java.util.LinkedHashMap<>();
     static {
+        LANGUAGE_MAP.put("en", "English (off)");
         LANGUAGE_MAP.put("ru", "Русский (Russian)");
         LANGUAGE_MAP.put("es", "Español (Spanish)");
         LANGUAGE_MAP.put("fr", "Français (French)");
@@ -52,8 +65,6 @@ public class TranslatorConfigScreen {
         LANGUAGE_MAP.put("id", "Bahasa Indonesia (Indonesian)");
     }
 
-    private static Screen activeParentScreen = null;
-
     private static Component translate(String key) {
         return Component.translatable("gui.skyblock_translator." + key);
     }
@@ -62,37 +73,111 @@ public class TranslatorConfigScreen {
         return Component.translatable("gui.skyblock_translator." + key, args);
     }
 
-    private static List<Option<?>> getLanguageOptions(TranslatorConfig config, Screen parent) {
-        List<Option<?>> options = new java.util.ArrayList<>();
-        for (java.util.Map.Entry<String, String> entry : LANGUAGE_MAP.entrySet()) {
-            String code = entry.getKey();
-            String name = entry.getValue();
-            boolean isCurrent = code.equals(config.targetLanguage);
-            String displayName = (isCurrent ? "§a§l➤ " : "  ") + name;
-            
-            options.add(ButtonOption.createBuilder()
-                .name(Component.literal(displayName))
-                .description(OptionDescription.of(
-                    isCurrent 
-                        ? translate("lang_selected")
-                        : translate("lang_select_btn", name)
-                ))
-                .action((opt, btn) -> {
-                    config.targetLanguage = code;
-                    TranslatorConfigManager.save();
-                    TranslationCache.loadForLanguage(code);
-                    SkyblockDictionary.loadForLanguage(code);
-                    net.minecraft.client.Minecraft.getInstance().execute(() -> {
-                        net.minecraft.client.Minecraft.getInstance().setScreen(createScreen(parent));
-                    });
+    static Option<String> languageOption(TranslatorConfig config) {
+        var choices = new java.util.LinkedHashMap<String, String>();
+        LANGUAGE_MAP.forEach((code, name) -> choices.put(name, code));
+        choices.putIfAbsent(config.targetLanguage, config.targetLanguage);
+        return Option.<String>createBuilder()
+                .name(translate("opt.target_language"))
+                .binding(LANGUAGE_MAP.get("ru"), () -> LANGUAGE_MAP.getOrDefault(config.targetLanguage, config.targetLanguage),
+                        label -> config.targetLanguage = choices.get(label))
+                .controller(option -> DropdownStringControllerBuilder.create(option)
+                        .values(List.copyOf(choices.keySet())).allowAnyValue(false))
+                .build();
+    }
+
+    private static Option<Boolean> toggle(String key, boolean defaultValue, BooleanSupplier get, Consumer<Boolean> set) {
+        return Option.<Boolean>createBuilder().name(translate(key))
+                .binding(defaultValue, get::getAsBoolean, set)
+                .controller(TickBoxControllerBuilder::create).build();
+    }
+
+    private static Option<String> providerOption(TranslatorConfig config) {
+        return Option.<String>createBuilder().name(translate("opt.provider"))
+                .description(OptionDescription.of(translate("opt.provider.desc")))
+                .binding("GOOGLE_FREE", () -> config.apiProvider, value -> config.apiProvider = value)
+                .controller(option -> CyclingListControllerBuilder.create(option)
+                        .values(List.of("GOOGLE_FREE", "DEEPL_FREE", "YANDEX"))
+                        .formatValue(value -> switch (value) {
+                            case "GOOGLE_FREE" -> translate("provider.google");
+                            case "DEEPL_FREE" -> translate("provider.deepl");
+                            case "YANDEX" -> translate("provider.yandex");
+                            default -> Component.literal(value);
+                        })).build();
+    }
+
+    private static Option<ApiKeyField> keyOption(String label, Supplier<String> get, Consumer<String> set) {
+        boolean[] revealed = {false};
+        return Option.<ApiKeyField>createBuilder().name(translate(label))
+                .description(OptionDescription.of(translate("opt.key.desc")))
+                .binding(new ApiKeyField("", false), () -> new ApiKeyField(get.get(), revealed[0]), field -> {
+                    set.accept(field.key());
+                    revealed[0] = field.revealed();
                 })
-                .build());
+                .customController(ApiKeyController::new).build();
+    }
+
+    private static ButtonOption revealKey(String label, Option<ApiKeyField> key) {
+        return ButtonOption.createBuilder().name(translate(label))
+                .description(OptionDescription.of(translate("opt.showkey.desc")))
+                .action((screen, button) -> {
+                    ApiKeyField field = key.pendingValue();
+                    key.requestSet(new ApiKeyField(field.key(), !field.revealed()));
+                }).build();
+    }
+
+    private static ButtonOption testProvider(Option<String> provider, Option<ApiKeyField> deepl,
+                                             Option<ApiKeyField> yandex, Option<Boolean> localOnly) {
+        return ButtonOption.createBuilder().name(translate("provider.test")).action((screen, button) -> {
+            String selected = provider.pendingValue();
+            String key = switch (selected) {
+                case "DEEPL_FREE" -> deepl.pendingValue().key();
+                case "YANDEX" -> yandex.pendingValue().key();
+                default -> "";
+            };
+            Minecraft client = Minecraft.getInstance();
+            var title = translate("provider.test");
+            Runnable close = () -> client.setScreen(screen);
+            var waitScreen = new AlertScreen(close, title, translate("provider.testing"));
+            client.setScreen(waitScreen);
+            TranslationService.testConnectionAsync(selected, key, localOnly.pendingValue())
+                    .thenAccept(result -> client.schedule(() -> {
+                        if (TranslatorModClient.currentScreen(client) == waitScreen) {
+                            var category = TranslationService.failureLabel(result);
+                            client.setScreen(new AlertScreen(close, title, translate("provider.result", selected, category)));
+                        }
+                    }));
+        }).build();
+    }
+
+    static void inspectDictionary(Screen parent, String phrase) {
+        var inspection = SkyblockDictionary.inspect(phrase);
+        var status = Component.translatable("gui.skyblock_translator.dictionary.result."
+                + inspection.status().name().toLowerCase(java.util.Locale.ROOT));
+        var result = Component.empty().append(status);
+        if (inspection.translation() != null) {
+            result.append("\n").append(Component.literal(inspection.translation()));
+            for (var source : inspection.sources()) {
+                result.append("\n").append(Component.translatable("gui.skyblock_translator.dictionary.source."
+                        + source.name().toLowerCase(java.util.Locale.ROOT)));
+            }
         }
-        return options;
+        for (var issue : inspection.ruleIssues().stream().limit(3).toList()) {
+            result.append("\n").append("⦁ ").append(Component.literal(issue.pattern())).append("\n");
+            if ("replacement".equals(issue.reason())) {
+                result.append(translate("dictionary.invalid_replacement", issue.groupCount(), issue.namedGroups()));
+            } else {
+                result.append(translate("dictionary.invalid_pattern"));
+            }
+        }
+        if (inspection.ruleIssues().size() > 3) {
+            result.append("\n").append(translate("dictionary.more_issues", inspection.ruleIssues().size() - 3));
+        }
+        Minecraft client = Minecraft.getInstance();
+        client.setScreen(new AlertScreen(() -> client.setScreen(parent), translate("dictionary.test"), result));
     }
 
     public static Screen createScreen(Screen parent) {
-        activeParentScreen = parent;
         TranslatorConfig config = TranslatorConfigManager.getConfig();
 
         
@@ -101,10 +186,20 @@ public class TranslatorConfigScreen {
 
         String currentSettingsKey = keySettingsMapping != null ? keySettingsMapping.getTranslatedKeyMessage().getString() : "NONE";
         String currentToggleKey = keyToggleMapping != null ? keyToggleMapping.getTranslatedKeyMessage().getString() : "NONE";
-
+        var deepl = keyOption("opt.deepl_key", () -> config.deeplApiKey, value -> config.deeplApiKey = value);
+        var yandex = keyOption("opt.yandex_key", () -> config.yandexApiKey, value -> config.yandexApiKey = value);
+        var provider = providerOption(config);
+        var localOnly = toggle("opt.local_only", false, () -> config.localOnly, value -> config.localOnly = value);
+        String savedLanguage = config.targetLanguage;
+        boolean savedLocalMode = config.localOnly;
         YetAnotherConfigLib configLib = YetAnotherConfigLib.createBuilder()
             .title(translate("title"))
-            .save(TranslatorConfigManager::save)
+            .save(() -> {
+                TranslatorConfigManager.save();
+                if (!savedLanguage.equals(config.targetLanguage) || savedLocalMode != config.localOnly) {
+                    TranslatorModClient.reloadTranslations();
+                }
+            })
             
             
             .category(ConfigCategory.createBuilder()
@@ -112,7 +207,7 @@ public class TranslatorConfigScreen {
                 .tooltip(translate("cat.language.tooltip"))
                 .group(OptionGroup.createBuilder()
                     .name(translate("group.language_select"))
-                    .options(getLanguageOptions(config, parent))
+                    .option(languageOption(config))
                     .build())
                 .build())
             
@@ -156,7 +251,7 @@ public class TranslatorConfigScreen {
                         .description(OptionDescription.of(translate("opt.key_settings.desc")))
                         .action((opt, btn) -> {
                             net.minecraft.client.Minecraft.getInstance().setScreen(
-                                new KeyBindCaptureScreen(createScreen(parent), keySettingsMapping)
+                                new KeyBindCaptureScreen(opt, keySettingsMapping, () -> opt.pendingChanges() ? opt : createScreen(parent))
                             );
                         })
                         .text(Component.literal(currentSettingsKey))
@@ -166,7 +261,7 @@ public class TranslatorConfigScreen {
                         .description(OptionDescription.of(translate("opt.key_toggle.desc")))
                         .action((opt, btn) -> {
                             net.minecraft.client.Minecraft.getInstance().setScreen(
-                                new KeyBindCaptureScreen(createScreen(parent), keyToggleMapping)
+                                new KeyBindCaptureScreen(opt, keyToggleMapping, () -> opt.pendingChanges() ? opt : createScreen(parent))
                             );
                         })
                         .text(Component.literal(currentToggleKey))
@@ -175,35 +270,19 @@ public class TranslatorConfigScreen {
                 
                 .group(OptionGroup.createBuilder()
                     .name(translate("group.api"))
-                    .option(Option.<String>createBuilder()
-                        .name(translate("opt.provider"))
-                        .description(OptionDescription.of(translate("opt.provider.desc")))
-                        .binding("GOOGLE_FREE", () -> config.apiProvider, val -> config.apiProvider = val)
-                        .controller(opt -> CyclingListControllerBuilder.create(opt)
-                            .values(List.of("GOOGLE_FREE", "DEEPL_FREE", "YANDEX"))
-                            .formatValue(val -> {
-                                switch(val) {
-                                    case "GOOGLE_FREE": return translate("provider.google");
-                                    case "DEEPL_FREE": return translate("provider.deepl");
-                                    case "YANDEX": return translate("provider.yandex");
-                                    default: return Component.literal(val);
-                                }
-                            }))
-                        .build())
-                    .option(Option.<Boolean>createBuilder()
-                        .name(translate("opt.showkey"))
-                        .description(OptionDescription.of(translate("opt.showkey.desc")))
-                        .binding(false, () -> showApiKey, val -> showApiKey = val)
-                        .controller(TickBoxControllerBuilder::create)
-                        .build())
-                    .option(Option.<String>createBuilder()
-                        .name(translate("opt.key"))
-                        .description(OptionDescription.of(translate("opt.key.desc")))
-                        .binding("", 
-                            () -> showApiKey ? (config.apiKey == null ? "" : config.apiKey) : (config.apiKey == null || config.apiKey.isEmpty() ? "" : "••••••••"),
-                            val -> { if (showApiKey || (val != null && !val.equals("••••••••"))) { config.apiKey = val; } })
-                        .controller(StringControllerBuilder::create)
-                        .build())
+                    .option(localOnly)
+                    .option(toggle("opt.online_chat", true, () -> config.onlineChat, value -> config.onlineChat = value))
+                    .option(toggle("opt.online_npc", true, () -> config.onlineNpc, value -> config.onlineNpc = value))
+                    .option(toggle("opt.online_tooltips", true, () -> config.onlineTooltips, value -> config.onlineTooltips = value))
+                    .option(toggle("opt.online_world", true, () -> config.onlineWorld, value -> config.onlineWorld = value))
+                    .option(toggle("opt.online_fallback", false, () -> config.allowGoogleFallback, value -> config.allowGoogleFallback = value))
+                    .option(toggle("opt.persist_chat_cache", false, () -> config.persistChatCache, value -> config.persistChatCache = value))
+                    .option(provider)
+                    .option(revealKey("opt.reveal_deepl", deepl))
+                    .option(deepl)
+                    .option(revealKey("opt.reveal_yandex", yandex))
+                    .option(yandex)
+                    .option(testProvider(provider, deepl, yandex, localOnly))
                     .build())
                 .build())
             
@@ -277,7 +356,7 @@ public class TranslatorConfigScreen {
                     .option(Option.<Boolean>createBuilder()
                         .name(translate("opt.dm_chat"))
                         .description(OptionDescription.of(translate("opt.dm_chat.desc")))
-                        .binding(true, () -> config.translateDirectMessages, val -> config.translateDirectMessages = val)
+                        .binding(false, () -> config.translateDirectMessages, val -> config.translateDirectMessages = val)
                         .controller(TickBoxControllerBuilder::create)
                         .build())
                     .option(Option.<Boolean>createBuilder()
@@ -484,76 +563,73 @@ public class TranslatorConfigScreen {
                                 //?} else
                                 /*client.player.sendSystemMessage(Component.literal("§a[SkyBlock Translator] Translation cache cleared successfully! / Кэш переводов успешно очищен!"));*/
                             }
-                            try {
-                                client.getSoundManager().play(net.minecraft.client.resources.sounds.SimpleSoundInstance.forUI(net.minecraft.sounds.SoundEvents.EXPERIENCE_ORB_PICKUP, 1.0F));
-                            } catch (Exception e) {}
-                            try {
-                                net.minecraft.client.gui.components.toasts.SystemToast.add(
-                                    client.getToastManager(),
-                                    net.minecraft.client.gui.components.toasts.SystemToast.SystemToastId.PERIODIC_NOTIFICATION,
-                                    Component.literal("SkyBlock Translator"),
-                                    Component.literal("Cache cleared! / Кэш очищен!")
-                                );
-                            } catch (Exception e) {}
                         })
                         .build())
                     .option(ButtonOption.createBuilder()
                         .name(translate("opt.reload"))
                         .description(OptionDescription.of(translate("opt.reload.desc")))
                         .action((opt, btn) -> {
-                            TranslatorConfigManager.load();
-                            String language = TranslatorConfigManager.getConfig().targetLanguage;
-                            TranslationCache.loadForLanguage(language);
-                            SkyblockDictionary.loadForLanguage(language);
-                            SkyblockDictionary.loadUserDictionary();
-                            TranslatorModClient.clearComponentCache();
-                            net.minecraft.client.Minecraft.getInstance().setScreen(createScreen(parent));
+                            Minecraft client = Minecraft.getInstance();
+                            Runnable reload = () -> {
+                                TranslatorConfigManager.load();
+                                TranslatorModClient.reloadTranslations();
+                                client.setScreen(createScreen(parent));
+                            };
+                            if (opt.pendingChanges()) {
+                                client.setScreen(new ConfirmScreen(confirmed -> {
+                                    if (confirmed) reload.run();
+                                    else client.setScreen(opt);
+                                }, translate("opt.reload"), translate("opt.reload_discard")));
+                            } else {
+                                reload.run();
+                            }
                         })
                         .build())
                     .option(ButtonOption.createBuilder()
+                        .name(translate("dictionary.test"))
+                        .action((screen, button) -> {
+                            Minecraft client = Minecraft.getInstance();
+                            client.setScreen(new DictionaryCheckScreen(screen));
+                        }).build())
+                    .option(ButtonOption.createBuilder()
                         .name(translate("opt.report"))
                         .description(OptionDescription.of(translate("opt.report.desc")))
-                        .action((opt, btn) -> {
-                            String url = "https://github.com/fridorin/Skyblock-Translator-Mod/issues";
-                            String os = System.getProperty("os.name").toLowerCase();
-                            try {
-                                ProcessBuilder pb;
-                                if (os.contains("win")) {
-                                    pb = new ProcessBuilder("cmd", "/c", "start", url);
-                                } else if (os.contains("mac")) {
-                                    pb = new ProcessBuilder("open", url);
-                                } else {
-                                    pb = new ProcessBuilder("xdg-open", url);
-                                }
-                                pb.start();
-                            } catch (Exception e) {
-                            }
-                        })
+                        .action((screen, option) -> ConfirmLinkScreen.confirmLinkNow(screen, ISSUES_PAGE))
                         .build())
                     .option(ButtonOption.createBuilder()
                         .name(translate("opt.suggest_translation"))
                         .description(OptionDescription.of(translate("opt.suggest_translation.desc")))
-                        .action((opt, btn) -> {
-                            String url = "https://github.com/fridorin/Skyblock-Translator-Mod/issues";
-                            String os = System.getProperty("os.name").toLowerCase();
-                            try {
-                                ProcessBuilder pb;
-                                if (os.contains("win")) {
-                                    pb = new ProcessBuilder("cmd", "/c", "start", url);
-                                } else if (os.contains("mac")) {
-                                    pb = new ProcessBuilder("open", url);
-                                } else {
-                                    pb = new ProcessBuilder("xdg-open", url);
-                                }
-                                pb.start();
-                            } catch (Exception e) {
-                            }
-                        })
+                        .action((screen, option) -> ConfirmLinkScreen.confirmLinkNow(screen, ISSUES_PAGE))
                         .build())
                     .build())
                 .build())
             .build();
 
         return configLib.generateScreen(parent);
+    }
+
+    private record ApiKeyField(String key, boolean revealed) {
+        @Override
+        public String toString() {
+            return "API key field";
+        }
+    }
+
+    private record ApiKeyController(Option<ApiKeyField> option) implements IStringController<ApiKeyField> {
+        @Override
+        public String getString() {
+            ApiKeyField field = option.pendingValue();
+            return field.revealed() || field.key().isEmpty() ? field.key() : MASKED_API_KEY;
+        }
+
+        @Override
+        public boolean isInputValid(String input) {
+            return option.pendingValue().revealed();
+        }
+
+        @Override
+        public void setFromString(String value) {
+            if (isInputValid(value)) option.requestSet(new ApiKeyField(value, true));
+        }
     }
 }

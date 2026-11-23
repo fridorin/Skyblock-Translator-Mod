@@ -27,6 +27,19 @@ public class MixinTargetTest {
     }
 
     @Test
+    public void keyCaptureRendersOnlyItsContents() throws Exception {
+        ClassNode screen = read("ru/fridorin/translator/gui/KeyBindCaptureScreen");
+        MethodNode draw = screen.methods.stream()
+                .filter(method -> List.of("render", "extractRenderState").contains(method.name))
+                .findFirst().orElseThrow();
+        boolean drawsBackgroundTwice = java.util.Arrays.stream(draw.instructions.toArray())
+                .filter(MethodInsnNode.class::isInstance)
+                .map(MethodInsnNode.class::cast)
+                .anyMatch(call -> List.of("renderBackground", "extractBackground").contains(call.name));
+        assertFalse("Minecraft renders the screen background before invoking the draw method", drawsBackgroundTwice);
+    }
+
+    @Test
     @SuppressWarnings("unchecked")
     public void allMixinTargetsExistAndScoreboardInvocationMatches() throws Exception {
         int checked = 0;

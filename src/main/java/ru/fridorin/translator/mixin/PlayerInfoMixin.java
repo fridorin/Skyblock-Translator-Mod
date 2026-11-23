@@ -2,7 +2,6 @@ package ru.fridorin.translator.mixin;
 
 import ru.fridorin.translator.config.TranslatorConfig;
 import ru.fridorin.translator.config.TranslatorConfigManager;
-import ru.fridorin.translator.service.TranslationService;
 import ru.fridorin.translator.TranslatorModClient;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.network.chat.Component;
